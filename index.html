@@ -583,16 +583,15 @@ function renderDash(){
   const totalKg = inStock.reduce((a,r)=>a+(+r.currentWeight||0),0);
   const lowKg = +store.settings.lowKg || 5;
   const low = inStock.filter(r=>(+r.currentWeight||0) <= lowKg);
+  /* history arrives separately in state.recentHistory (newest first) */
+  const histAll = store.recentHistory||[];
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-30);
   let cut30 = 0;
-  rolls.forEach(r=>(r.history||[]).forEach(h=>{
+  histAll.forEach(h=>{
     if(h.type==="cutting" && h.date){ const d=new Date(h.date+"T00:00:00"); if(d>=cutoff) cut30 += (+h.weightUsed||0); }
-  }));
+  });
   // recent activity
-  const acts=[];
-  rolls.forEach(r=>(r.history||[]).forEach(h=>acts.push({r:r, h:h})));
-  acts.sort((a,b)=>String(b.h.date).localeCompare(String(a.h.date)));
-  const recent = acts.slice(0,8);
+  const recent = histAll.slice(0,8).map(h=>({r:{id:h.rollId}, h:h}));
 
   let h = '<div class="kpis">'
     + '<div class="kpi k1"><div class="kico">🧵</div><div class="n">'+inStock.length+'</div><div class="l">Rolls in godown</div></div>'
@@ -600,6 +599,10 @@ function renderDash(){
     + '<div class="kpi k3"><div class="kico">✂️</div><div class="n">'+kg(cut30)+'</div><div class="l">Cut in last 30 days</div></div>'
     + '<div class="kpi k4"><div class="kico">⚠️</div><div class="n" style="color:'+(low.length?'var(--amber)':'var(--green)')+'">'+low.length+'</div><div class="l">Low stock (≤ '+lowKg+' kg)</div></div>'
     + '</div>';
+
+  if(!("recentHistory" in store))
+    h += '<div class="card" style="border:1.5px solid var(--red)"><b style="color:var(--red)">⚠️ Server app is outdated</b>'
+      + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Cutting totals and activity below need the newest <b>app.py</b> and <b>db.py</b> on the server. Re-upload them to GitHub, let Render redeploy, then reload — this message will disappear.</div></div>';
 
   h += chartCards(rolls);
 
@@ -613,7 +616,9 @@ function renderDash(){
     ).join("") + '</div>';
   }
   h += '<div class="card"><h3>🕘 Recent activity</h3>';
-  if(!recent.length) h += '<div class="empty"><div class="big">📦</div>No activity yet. Add your first roll to begin.</div>';
+  if(!recent.length) h += ('recentHistory' in store)
+    ? '<div class="empty"><div class="big">📦</div>No activity yet. Add your first roll to begin.</div>'
+    : '<div style="color:var(--muted);font-size:13px">Waiting for the updated server (see warning above).</div>';
   else h += recent.map(a=>{
     const dot = a.h.type==="created" ? "var(--acc)" : (a.h.type==="cutting" ? "var(--amber)" : "var(--violet)");
     const what = a.h.type==="created" ? "Roll created · "+kg(a.h.remaining)

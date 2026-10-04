@@ -325,6 +325,17 @@ def get_roll_history(rid):
     return [_hist(r) for r in rs]
 
 
+def get_recent_history(days=60):
+    """History entries from the last N days, newest first — powers the
+    dashboard KPIs and recent-activity feed."""
+    import datetime
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    with _conn() as c:
+        rs = _q(c, "SELECT * FROM history WHERE date >= %s ORDER BY date DESC, hid DESC",
+                (cutoff,)).fetchall()
+    return [_hist(r) for r in rs]
+
+
 def get_history(frm=None, to=None):
     sql = ("SELECT h.*, r.fabric_type, r.color FROM history h"
            " LEFT JOIN rolls r ON r.id=h.roll_id WHERE 1=1")

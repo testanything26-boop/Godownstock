@@ -97,6 +97,7 @@ def state():
     return jsonify({
         "user": me(),
         "rolls": db.get_rolls(),
+        "recentHistory": db.get_recent_history(),
         "settings": db.get_settings(),
     })
 
@@ -258,12 +259,12 @@ def rep_cut():
     rolls = {r["id"]: r for r in db.get_rolls()}
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Date", "Roll ID", "Fabric", "Action", "Style",
+    w.writerow(["Date", "Roll ID", "Fabric", "Colour", "Action", "Style",
                 "Used kg", "Left kg", "Notes"])
     for h in hist:
         r = rolls.get(h["rollId"], {})
         w.writerow([h["date"], h["rollId"], r.get("fabricType", ""),
-                    h["type"], h["style"], h["weightUsed"],
+                    r.get("color", ""), h["type"], h["style"], h["weightUsed"],
                     h["remaining"], h["notes"]])
     return Response(
         buf.getvalue(), mimetype="text/csv",
