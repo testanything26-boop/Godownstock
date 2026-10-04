@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: godown-stock
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4
+    # 1 worker + an in-app lock serializes roll updates, so two phones cutting
+    # the SAME roll can't corrupt its weight. Threads keep reads fast.
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
