@@ -16,12 +16,20 @@ phone and logs in.
    `postgresql://postgres:[YOUR-PASSWORD]@db.xxxxx.supabase.co:6543/postgres`
    (Port **6543** = the pooler — best for this app.)
    **This string is a password. Never paste it in chat.**
+   - Replace `[YOUR-PASSWORD]` with the database password from step 2.
+   - If your password has special characters, URL-encode them:
+     `@` → `%40`, `#` → `%23`, `/` → `%2F`, `?` → `%3F`, `:` → `%3A`.
+     (e.g. password `ab@cd` becomes `ab%40cd`).
 5. Anytime you want to peek at your data like a spreadsheet: left menu →
    **Table Editor** → open `rolls` or `history`.
 
 ## Part 2 — Render (free web server, 5 min)
 
-1. Push this folder to a GitHub repo (it already has `render.yaml`).
+1. Push this folder to a GitHub repo. Upload **every file** to the repo root —
+   `app.py`, `db.py`, `index.html`, `schema.sql`, `requirements.txt`,
+   `render.yaml`, `SETUP.md` (GitHub web upload can't do folders, so
+   `index.html` lives at the root; the `templates/` copy is a backup).
+   It already has `render.yaml`.
 2. Go to **dashboard.render.com** → **New → Web Service** →
    **Build and deploy from a Git repository** → select your repo.
 3. Render reads `render.yaml` automatically. Plan: **Free**.

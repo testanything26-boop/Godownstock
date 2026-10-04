@@ -27,12 +27,22 @@ def _get_pool():
     """Lazily create a small threaded connection pool."""
     global _pool
     if _pool is None:
-        import psycopg2
-        from psycopg2 import pool as pgpool
         url = os.environ.get("DATABASE_URL", "").strip()
         if not url:
             raise ConfigError("Set the DATABASE_URL env var (see SETUP.md).")
-        _pool = pgpool.ThreadedConnectionPool(1, 8, url)
+        try:
+            import psycopg2  # noqa
+            from psycopg2 import pool as pgpool
+        except ImportError:
+            raise ConfigError("Database driver not installed — check the Render build logs.")
+        try:
+            _pool = pgpool.ThreadedConnectionPool(1, 8, url)
+        except Exception as e:
+            raise ConfigError(
+                "Could not reach the database. Check DATABASE_URL in Render: use the "
+                "port-6543 pooler string, replace [YOUR-PASSWORD] with the real password, "
+                "and URL-encode special characters in the password "
+                "(@ → %40, # → %23, / → %2F, ? → %3F).") from e
     return _pool
 
 

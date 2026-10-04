@@ -10,7 +10,7 @@ import time
 from functools import wraps
 from threading import Lock
 
-from flask import Flask, request, jsonify, session, render_template, Response
+from flask import Flask, request, jsonify, session, Response
 
 import db
 
@@ -61,7 +61,16 @@ def with_db(f):
 
 @app.route("/")
 def index():
-    return render_template("index.html", app_url=APP_URL)
+    # Works whether index.html was uploaded to the repo root (GitHub web
+    # upload can't do folders) or into templates/.
+    base = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(base, "index.html"),
+              os.path.join(base, "templates", "index.html")):
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return f.read().replace("{{ app_url }}", APP_URL)
+    return ("index.html is missing — upload it to the repo root "
+            "(Add file → Upload files)."), 500
 
 
 @app.route("/api/login", methods=["POST"])
