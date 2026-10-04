@@ -102,6 +102,13 @@ def state():
 
 
 # ---------------------------------------------------------------- rolls
+@app.route("/api/rolls/next-id")
+@login_required
+@with_db
+def next_id():
+    return jsonify({"id": db.peek_next_id()})
+
+
 @app.route("/api/rolls", methods=["POST"])
 @login_required
 @with_db
@@ -122,6 +129,13 @@ def bulk_create():
             return jsonify({"ids": db.bulk_create(request.get_json(force=True))})
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/rolls/<rid>/history")
+@login_required
+@with_db
+def roll_history(rid):
+    return jsonify(db.get_roll_history(rid))
 
 
 @app.route("/api/rolls/<rid>", methods=["PUT"])

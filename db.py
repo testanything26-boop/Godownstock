@@ -152,6 +152,21 @@ def delete_user(username):
 
 
 # ---------------------------------------------------------------- rolls
+def peek_next_id():
+    """The ID the next auto-created roll will get (informational only;
+    the real assignment happens at save time)."""
+    import re
+    with _conn() as c:
+        r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
+        seq = int(r["value"]) if r else 0
+        m = 0
+        for row in _q(c, "SELECT id FROM rolls WHERE id LIKE 'R-%%'").fetchall():
+            mm = re.match(r"^R-(\d+)$", (row["id"] or "").upper())
+            if mm:
+                m = max(m, int(mm.group(1)))
+        return "R-%04d" % (max(seq, m) + 1)
+
+
 def _next_id(c):
     r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
     seq = int(r["value"]) if r else 0
@@ -301,6 +316,13 @@ def get_rolls():
     with _conn() as c:
         rs = _q(c, "SELECT * FROM rolls ORDER BY id").fetchall()
     return [_roll(r) for r in rs]
+
+
+def get_roll_history(rid):
+    with _conn() as c:
+        rs = _q(c, "SELECT * FROM history WHERE roll_id=%s ORDER BY date DESC, hid DESC",
+                (rid,)).fetchall()
+    return [_hist(r) for r in rs]
 
 
 def get_history(frm=None, to=None):

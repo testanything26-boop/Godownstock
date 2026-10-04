@@ -671,7 +671,7 @@ function renderRollsList(){
 }
 
 /* ---------- roll detail ---------- */
-function renderDetail(){
+async function renderDetail(){
   const r = findRoll(currentRollId);
   const box = $("v-detail");
   if(!r){ box.innerHTML = '<div class="empty"><div class="big">❓</div>Roll not found.</div>'; return; }
@@ -701,23 +701,33 @@ function renderDetail(){
     + '<div class="qrbox">'+qrSVG(rollQR(r.id))+'</div>'
     + '<div style="margin-top:8px;color:var(--muted);font-size:13px">Scan this with the <b>Scan</b> tab or any phone camera to open this roll. Code contains: <b>'+esc(rollQR(r.id))+'</b></div></div>';
 
-  const hist = (r.history||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  h += '<div class="card"><h3>📜 Full history</h3>';
-  if(!hist.length) h += '<div style="color:var(--muted)">No history yet.</div>';
-  else h += '<table><tr><th>Date</th><th>Action</th><th>Style</th><th>Used</th><th>Left</th></tr>'
-    + hist.map(x=>{
-      const dot = x.type==="created"?"var(--acc)":(x.type==="cutting"?"var(--amber)":"var(--violet)");
-      const act = x.type==="created"?"Created":(x.type==="cutting"?"Cutting":"Adjustment");
-      return '<tr><td>'+fmtDate(x.date)+'</td><td><span class="hist-dot" style="background:'+dot+'"></span>'+act
-        + (x.notes?'<div style="color:var(--muted);font-size:11px">'+esc(x.notes)+'</div>':"")
-        + '</td><td>'+esc(x.style||"—")+'</td><td>'+(x.type==="cutting"?kg(x.weightUsed):"—")+'</td><td>'+kg(x.remaining)+'</td></tr>';
-    }).join("") + '</table>';
-  h += '</div>';
+  h += '<div class="card"><h3>📜 Full history</h3><div id="hist-body"><div style="color:var(--muted)">Loading history…</div></div></div>';
   if(store.user && store.user.role==="admin")
     h += '<div class="card"><button class="btn danger small" onclick="deleteRoll(\''+esc(r.id)+'\')">🗑 Delete roll</button></div>';
   box.innerHTML = h;
-}
-async function deleteRoll(id){
+  /* history lives in its own table — fetch it fresh so cuts logged on any
+     phone show up here immediately */
+  try{
+    const hist = await api("GET","/api/rolls/"+encodeURIComponent(r.id)+"/history");
+    const el = $("hist-body");
+    if(!el) return;
+    if(!hist.length){ el.innerHTML = '<div style="color:var(--muted)">No history yet.</div>'; return; }
+    el.innerHTML = '<table><tr><th>Date</th><th>Action</th><th>Style</th><th>Used</th><th>Left</th></tr>'
+      + hist.map(x=>{
+        const dot = x.type==="created"?"var(--acc)":(x.type==="cutting"?"var(--amber)":"var(--violet)");
+        const act = x.type==="created"?"Created":(x.type==="cutting"?"Cutting":"Adjustment");
+        return '<tr><td>'+fmtDate(x.date)+'</td><td><span class="hist-dot" style="background:'+dot+'"></span>'+act
+          + (x.notes?'<div style="color:var(--muted);font-size:11px">'+esc(x.notes)+'</div>':"")
+          + '</td><td>'+esc(x.style||"—")+'</td><td>'+(x.type==="cutting"?kg(x.weightUsed):"—")+'</td><td>'+kg(x.remaining)+'</td></tr>';
+      }).join("") + '</table>';
+  }catch(e){
+    const el = $("hist-body");
+    if(el){
+      if(e.message==="login") showLogin();
+      else el.innerHTML = '<div style="color:var(--red)">Could not load history: '+esc(e.message)+'</div>';
+    }
+  }
+}async function deleteRoll(id){
   const r = findRoll(id); if(!r) return;
   if(!confirm("Delete roll "+r.id+" and its full history? This cannot be undone.")) return;
   try{ await api("DELETE","/api/rolls/"+encodeURIComponent(id)); await refreshState(); go("rolls"); }
@@ -732,7 +742,8 @@ function openRollForm(id){
   const dl = (list,dlid)=>'<datalist id="'+dlid+'">'+list.map(x=>'<option value="'+esc(x)+'">').join("")+'</datalist>';
   $("m-roll-sheet").innerHTML =
     '<h2>'+(isNew?"➕ Add new roll":"✏️ Edit roll "+esc(r.id))+'</h2>'
-    + '<label>Roll ID</label><input id="f-id" value="'+esc(r?r.id:"")+'" '+(isNew?"":"readonly")+' placeholder="Auto-assigned (e.g. R-0101)" autocapitalize="characters">'
+    + '<label>Roll ID</label><input id="f-id" value="'+esc(r?r.id:"")+'" '+(isNew?"":"readonly")+' placeholder="Leave blank — auto ID" autocapitalize="characters">'
+    + (isNew?'<div id="nextid-hint" style="font-size:13px;color:var(--muted);margin:-4px 0 10px">Finding next ID…</div>':"")
     + '<div class="grid2"><div><label>Fabric type</label><input id="f-fabric" list="dl-fab" value="'+esc(r?r.fabricType:"")+'" placeholder="e.g. Cotton Jersey">'+dl(fabrics,"dl-fab")+'</div>'
     + '<div><label>Colour</label><input id="f-color" value="'+esc(r?r.color:"")+'" placeholder="e.g. Black"></div></div>'
     + '<div class="grid2"><div><label>Dia</label><input id="f-dia" value="'+esc(r?r.dia:"")+'" placeholder="e.g. 34"></div>'
@@ -744,6 +755,12 @@ function openRollForm(id){
     + '<div class="btnrow"><button class="btn" onclick="saveRollForm('+(isNew?"null":"'"+esc(r.id)+"'")+')">💾 Save roll</button>'
     + '<button class="btn ghost" onclick="closeModal(\'m-roll\')">Cancel</button></div>';
   $("m-roll").classList.add("open");
+  if(isNew){
+    api("GET","/api/rolls/next-id").then(function(d){
+      const el=$("nextid-hint");
+      if(el&&d&&d.id) el.innerHTML='Leave blank &rarr; ID will be <b>'+esc(d.id)+'</b>. Or type your own.';
+    }).catch(function(){ const el=$("nextid-hint"); if(el) el.innerHTML='Leave blank for an automatic ID.'; });
+  }
 }
 async function saveRollForm(id){
   const isNew = !id;
