@@ -97,6 +97,7 @@ def state():
     return jsonify({
         "user": me(),
         "rolls": db.get_rolls(),
+        "locations": db.list_locations(),
         "recentHistory": db.get_recent_history(),
         "settings": db.get_settings(),
     })
@@ -170,6 +171,45 @@ def delete_roll(rid):
         return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------- locations (admin)
+@app.route("/api/locations")
+@login_required
+@with_db
+def list_locations():
+    return jsonify(db.list_locations())
+
+
+@app.route("/api/locations", methods=["POST"])
+@admin_required
+@with_db
+def create_location():
+    with write_lock:
+        try:
+            return jsonify(db.create_location((request.get_json(force=True) or {}).get("name")))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/locations/<int:lid>", methods=["PUT"])
+@admin_required
+@with_db
+def rename_location(lid):
+    with write_lock:
+        try:
+            return jsonify(db.rename_location(lid, (request.get_json(force=True) or {}).get("name")))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/locations/<int:lid>", methods=["DELETE"])
+@admin_required
+@with_db
+def delete_location(lid):
+    with write_lock:
+        db.delete_location(lid)
+        return jsonify({"ok": True})
+
+
 # ---------------------------------------------------------------- users (admin)
 @app.route("/api/users")
 @admin_required
@@ -236,12 +276,12 @@ def rep_stock():
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Roll ID", "Fabric", "Colour", "Dia", "GSM", "Weight kg",
-                "In stock kg", "Manufacturer", "Created", "Last used",
+                "In stock kg", "Manufacturer", "Godown", "Created", "Last used",
                 "Status", "Styles"])
     for r in db.get_rolls():
         w.writerow([r["id"], r["fabricType"], r["color"], r["dia"], r["gsm"],
                     r["weight"], r["currentWeight"], r["manufacturer"],
-                    r["createdDate"], r["lastUsedDate"], r["status"],
+                    r["location"], r["createdDate"], r["lastUsedDate"], r["status"],
                     "; ".join(r["styles"])])
     return Response(
         buf.getvalue(), mimetype="text/csv",

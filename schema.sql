@@ -41,3 +41,12 @@ create table if not exists meta (
   key text primary key,
   value text default ''
 );
+
+-- v2.1: multiple godown locations + company name (safe to re-run;
+-- the app also auto-applies this on login via db._ensure_location_schema).
+create table if not exists locations (
+  id serial primary key,
+  name text unique not null
+);
+alter table rolls add column if not exists location_id integer references locations(id);
+-- company name lives in meta under key 'companyName' (app defaults to 'Chakra Production').

@@ -72,6 +72,30 @@ def _q(c, sql, params=()):
     return cur
 
 
+def _ensure_location_schema(c):
+    """Idempotent migration for the multi-godown feature (v2.1): locations
+    table + rolls.location_id. Runs on every login via ensure_seed, so
+    existing deployments upgrade without touching the SQL editor."""
+    _q(c, "CREATE TABLE IF NOT EXISTS locations"
+          " (id serial primary key, name text unique not null)")
+    _q(c, "ALTER TABLE rolls ADD COLUMN IF NOT EXISTS"
+          " location_id integer REFERENCES locations(id)")
+
+
+def _location_id(c, lid):
+    """Validate an incoming location id; returns int or None."""
+    if lid in (None, "", 0, "0"):
+        return None
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        raise ValueError("Unknown godown location")
+    _ensure_location_schema(c)
+    if not _q(c, "SELECT 1 FROM locations WHERE id=%s", (lid,)).fetchone():
+        raise ValueError("Unknown godown location")
+    return lid
+
+
 # ---------------------------------------------------------------- shapes
 def _roll(d):
     return {
@@ -88,6 +112,8 @@ def _roll(d):
         "styles": [s for s in (d.get("styles") or "").split(",") if s],
         "lastUsedDate": d.get("last_used_date") or None,
         "notes": d.get("notes") or "",
+        "locationId": d.get("location_id"),
+        "location": d.get("location_name") or "",
     }
 
 
@@ -109,6 +135,7 @@ def ensure_seed():
     au = os.environ.get("ADMIN_USER", "admin").strip() or "admin"
     ap = os.environ.get("ADMIN_PASS", "").strip()
     with _conn() as c:
+        _ensure_location_schema(c)
         n = _q(c, "SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         if n == 0:
             if not ap:
@@ -194,7 +221,9 @@ def _bump_seq_for(c, rid):
 
 
 def _get_roll(c, rid):
-    r = _q(c, "SELECT * FROM rolls WHERE id=%s", (rid,)).fetchone()
+    r = _q(c, "SELECT r.*, l.name AS location_name FROM rolls r"
+              " LEFT JOIN locations l ON l.id=r.location_id WHERE r.id=%s",
+           (rid,)).fetchone()
     return _roll(r) if r else None
 
 
@@ -218,11 +247,12 @@ def create_roll(data):
         else:
             rid, _ = _next_id(c)
         _q(c, "INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
-              " manufacturer, created_date, status, styles, last_used_date, notes)"
-              " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s)",
+              " manufacturer, created_date, status, styles, last_used_date, notes, location_id)"
+              " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)",
            (rid, data.get("fabricType", ""), data.get("color", ""), data.get("dia", ""),
             data.get("gsm", ""), weight, weight, data.get("manufacturer", ""),
-            data.get("createdDate", ""), data.get("notes", "")))
+            data.get("createdDate", ""), data.get("notes", ""),
+            _location_id(c, data.get("locationId"))))
         _add_history(c, rid, data.get("createdDate", ""), "created", "", 0, weight, "Roll created")
         return _get_roll(c, rid)
 
@@ -233,17 +263,18 @@ def bulk_create(data):
         raise ValueError("Give 1–500 rolls")
     ids = []
     with _conn() as c:
+        loc = _location_id(c, (data or {}).get("locationId"))
         for r in rows:
             weight = round(float(r.get("weight") or 0), 2)
             if weight <= 0:
                 raise ValueError("Every roll needs a weight above 0")
             rid, _ = _next_id(c)
             _q(c, "INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
-                  " manufacturer, created_date, status, styles, last_used_date, notes)"
-                  " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s)",
+                  " manufacturer, created_date, status, styles, last_used_date, notes, location_id)"
+                  " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)",
                (rid, r.get("fabricType", ""), r.get("color", ""), r.get("dia", ""),
                 r.get("gsm", ""), weight, weight, r.get("manufacturer", ""),
-                r.get("createdDate", ""), r.get("notes", "")))
+                r.get("createdDate", ""), r.get("notes", ""), loc))
             _add_history(c, rid, r.get("createdDate", ""), "created", "", 0, weight, "Roll created (bulk inward)")
             ids.append(rid)
     return ids
@@ -258,12 +289,13 @@ def update_roll(rid, data):
         old_w = float(r["weight"] or 0)
         new_w = round(float(data.get("weight", old_w) or 0), 2)
         _q(c, "UPDATE rolls SET fabric_type=%s, color=%s, dia=%s, gsm=%s,"
-              " manufacturer=%s, created_date=%s, notes=%s WHERE id=%s",
+              " manufacturer=%s, created_date=%s, notes=%s, location_id=%s WHERE id=%s",
            (data.get("fabricType", r["fabric_type"]), data.get("color", r["color"]),
             data.get("dia", r["dia"]), data.get("gsm", r["gsm"]),
             data.get("manufacturer", r["manufacturer"]),
             data.get("createdDate", r["created_date"]),
-            data.get("notes", r["notes"]), rid))
+            data.get("notes", r["notes"]),
+            _location_id(c, data.get("locationId")), rid))
         if new_w != old_w:
             import datetime
             diff = new_w - old_w
@@ -314,7 +346,10 @@ def delete_roll(rid):
 
 def get_rolls():
     with _conn() as c:
-        rs = _q(c, "SELECT * FROM rolls ORDER BY id").fetchall()
+        _ensure_location_schema(c)
+        rs = _q(c, "SELECT r.*, l.name AS location_name FROM rolls r"
+                   " LEFT JOIN locations l ON l.id=r.location_id"
+                   " ORDER BY r.id").fetchall()
     return [_roll(r) for r in rs]
 
 
@@ -387,6 +422,51 @@ def import_csv(text):
     return bulk_create({"rolls": rows})
 
 
+# ---------------------------------------------------------------- locations
+def list_locations():
+    with _conn() as c:
+        _ensure_location_schema(c)
+        rs = _q(c, "SELECT id, name FROM locations ORDER BY name").fetchall()
+    return [{"id": r["id"], "name": r["name"]} for r in rs]
+
+
+def create_location(name):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Location name is required")
+    with _conn() as c:
+        _ensure_location_schema(c)
+        ex = _q(c, "SELECT 1 FROM locations WHERE LOWER(name)=LOWER(%s)", (name,)).fetchone()
+        if ex:
+            raise ValueError("A godown with that name already exists")
+        r = _q(c, "INSERT INTO locations(name) VALUES (%s) RETURNING id, name", (name,)).fetchone()
+    return {"id": r["id"], "name": r["name"]}
+
+
+def rename_location(lid, name):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Location name is required")
+    with _conn() as c:
+        _ensure_location_schema(c)
+        ex = _q(c, "SELECT 1 FROM locations WHERE LOWER(name)=LOWER(%s) AND id<>%s",
+                (name, lid)).fetchone()
+        if ex:
+            raise ValueError("A godown with that name already exists")
+        cur = _q(c, "UPDATE locations SET name=%s WHERE id=%s RETURNING id, name",
+                 (name, lid)).fetchone()
+        if not cur:
+            raise ValueError("Location not found")
+    return {"id": cur["id"], "name": cur["name"]}
+
+
+def delete_location(lid):
+    with _conn() as c:
+        _ensure_location_schema(c)
+        _q(c, "UPDATE rolls SET location_id=NULL WHERE location_id=%s", (lid,))
+        _q(c, "DELETE FROM locations WHERE id=%s", (lid,))
+
+
 # ---------------------------------------------------------------- settings
 def get_settings():
     with _conn() as c:
@@ -396,7 +476,8 @@ def get_settings():
         low = float(m.get("lowKg", 5))
     except ValueError:
         low = 5
-    return {"lowKg": low, "labelPreset": m.get("labelPreset", "8")}
+    return {"lowKg": low, "labelPreset": m.get("labelPreset", "8"),
+            "companyName": m.get("companyName", "Chakra Production")}
 
 
 def set_settings(d):
@@ -410,3 +491,7 @@ def set_settings(d):
             _q(c, "INSERT INTO meta(key, value) VALUES ('labelPreset', %s)"
                    " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
                (str(d["labelPreset"]),))
+        if "companyName" in d:
+            _q(c, "INSERT INTO meta(key, value) VALUES ('companyName', %s)"
+                   " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+               (str(d["companyName"] or "").strip() or "Chakra Production",))
