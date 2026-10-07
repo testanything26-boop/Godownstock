@@ -351,6 +351,11 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
   #printArea.sheet-12 .label .t .ln{font-size:8.5pt; margin-top:.6mm;}
   #printArea.sheet-24 .label .t .id{font-size:11pt;}
   #printArea.sheet-24 .label .t .ln{font-size:7.5pt; margin-top:.5mm;}
+  #printArea.sheet-custom .labelpage{grid-template-columns:repeat(var(--lbl-cols,2), var(--lbl-w,100mm)); gap:2mm; justify-content:start;}
+  #printArea.sheet-custom .label{width:var(--lbl-w,100mm); height:var(--lbl-h,20mm); border:1px solid #000; border-radius:1mm; padding:1.5mm; display:flex; gap:2mm; align-items:center; page-break-inside:avoid; overflow:hidden;}
+  #printArea.sheet-custom .label .qr svg{width:var(--lbl-qr,15mm); height:var(--lbl-qr,15mm);}
+  #printArea.sheet-custom .label .t .id{font-size:9pt;}
+  #printArea.sheet-custom .label .t .ln{font-size:6.5pt; margin-top:.4mm; line-height:1.25;}
 }
 </style>
 </head>
@@ -436,7 +441,7 @@ let APP_URL = "{{ app_url }}";
 if(APP_URL.charAt(0) === "{") APP_URL = ""; /* opened as plain file, not via server */
 
 /* ---------- server store ---------- */
-let store = { rolls:[], locations:[], wastage:[], settings:{lowKg:5, labelPreset:"8", companyName:"Chakra Production"}, user:null };
+let store = { rolls:[], locations:[], wastage:[], settings:{lowKg:5, labelPreset:"8", labelCustomW:100, labelCustomH:20, labelCustomCols:2, companyName:"Chakra Production"}, user:null };
 
 async function api(method, path, body){
   const opt = { method:method, headers:{}, cache:"no-store" }; /* never serve API data from browser cache */
@@ -453,7 +458,7 @@ async function refreshState(){
   store.locations = d.locations||[];
   store.wastage = d.wastage||[];
   store.recentHistory = d.recentHistory||[];
-  store.settings = Object.assign({lowKg:5, labelPreset:"8", companyName:"Chakra Production"}, d.settings||{});
+  store.settings = Object.assign({lowKg:5, labelPreset:"8", labelCustomW:100, labelCustomH:20, labelCustomCols:2, companyName:"Chakra Production"}, d.settings||{});
   store.user = d.user;
   const hs = $("hdr-sub"); if(hs) hs.textContent = (store.settings.companyName||"Chakra Production") + " · Fabric roll QR manager";
   updateUserUI();
@@ -1010,7 +1015,7 @@ async function saveBulkForm(){
 /* ---------- labels ---------- */
 let labelSel = {};
 let labelCopies = 1; /* stickers printed per roll */
-const LABEL_PRESETS = [["8","8 per sheet — large (2 × 4)"],["12","12 per sheet — medium (3 × 4)"],["24","24 per sheet — small (3 × 8)"]];
+const LABEL_PRESETS = [["8","8 per sheet — large (2 × 4)"],["12","12 per sheet — medium (3 × 4)"],["24","24 per sheet — small (3 × 8)"],["custom","Custom size — set below"]];
 function renderLabels(){
   const preset = store.settings.labelPreset || "8";
   const list = store.rolls.filter(r=>r.status!=="exhausted").slice().sort((a,b)=>a.id.localeCompare(b.id));
@@ -1022,6 +1027,12 @@ function renderLabels(){
     + '</select></div>'
     + '<div><label>Select all inwarded on</label><div class="searchrow"><input type="date" id="lb-date" value="'+todayISO()+'">'
     + '<button class="btn small" onclick="labelSelectDate()">Select</button></div></div></div>'
+    + '<div id="customSizeBox" style="'+(preset==="custom"?"":"display:none")+'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
+    + '<div style="font-weight:700;margin-bottom:8px">Custom label size</div>'
+    + '<div class="grid2"><div><label>Width (mm)</label><input type="number" id="cs-w" min="10" step="1" value="'+(store.settings.labelCustomW||100)+'"></div>'
+    + '<div><label>Height (mm)</label><input type="number" id="cs-h" min="10" step="1" value="'+(store.settings.labelCustomH||20)+'"></div>'
+    + '<div><label>Labels per row</label><input type="number" id="cs-c" min="1" max="10" step="1" value="'+(store.settings.labelCustomCols||2)+'"></div></div>'
+    + '<div class="btnrow"><button class="btn small" onclick="saveCustomSize()">Save size</button></div></div>'
     + '<div class="btnrow"><button class="btn ghost small" onclick="labelAll(true)">Select all</button>'
     + '<button class="btn ghost small" onclick="labelAll(false)">Clear</button>'
     + '<button class="btn small" id="lb-print" onclick="printSelectedLabels()">🖨️ Print ('+(n*labelCopies)+')</button>'
@@ -1063,6 +1074,13 @@ function printSelectedLabels(){
   if(!ids.length){ alert("Select at least one roll."); return; }
   printLabels(ids);
 }
+function applyCustomLabelVars(pa){
+  const w = +store.settings.labelCustomW||100, h = +store.settings.labelCustomH||20, c = +store.settings.labelCustomCols||2;
+  pa.style.setProperty("--lbl-w", w+"mm");
+  pa.style.setProperty("--lbl-h", h+"mm");
+  pa.style.setProperty("--lbl-cols", c);
+  pa.style.setProperty("--lbl-qr", Math.max(10, Math.min(25, h-5))+"mm");
+}
 function printLabels(ids){
   const rolls = ids.map(findRoll).filter(Boolean);
   if(!rolls.length){ alert("No rolls selected."); return; }
@@ -1070,13 +1088,20 @@ function printLabels(ids){
   const preset = store.settings.labelPreset || "8";
   const pa = $("printArea");
   pa.className = "sheet-"+preset;
-  const one = r =>
-    '<div class="label"><div class="qr">'+qrSVG(rollQR(r.id))+'</div>'
+  if(preset==="custom") applyCustomLabelVars(pa);
+  const one = r => {
+    if(preset==="custom")
+      return '<div class="label"><div class="qr">'+qrSVG(rollQR(r.id))+'</div>'
+      + '<div class="t"><div class="id">'+esc(r.id)+'</div>'
+      + '<div class="ln">'+esc(r.fabricType||"")+' · '+esc(r.color||"")+'</div>'
+      + '<div class="ln">Dia '+esc(r.dia||"—")+' · '+kg(r.weight)+'</div></div></div>';
+    return '<div class="label"><div class="qr">'+qrSVG(rollQR(r.id))+'</div>'
     + '<div class="t"><div class="id">'+esc(r.id)+'</div>'
     + '<div class="ln">'+esc(r.fabricType||"")+' · '+esc(r.color||"")+'</div>'
     + '<div class="ln">Dia '+esc(r.dia||"—")+' · '+esc(r.gsm||"—")+' GSM · '+kg(r.weight)+'</div>'
     + '<div class="ln"><b>Mfg:</b> '+esc(r.manufacturer||"—")+'</div>'
     + '<div class="ln"><b>Date:</b> '+fmtDate(r.createdDate)+'</div></div></div>';
+  };
   let html = "";
   rolls.forEach(r=>{ for(let i=0;i<copies;i++) html += one(r); });
   pa.innerHTML = '<div class="labelpage">' + html + '</div>';
@@ -1110,7 +1135,7 @@ function renderWastage(){
       return '<div class="rollcard" onclick="openBag(\''+esc(b.id)+'\')">'
         + '<div style="display:flex;justify-content:space-between;align-items:center"><span class="rid">'+esc(b.id)+'</span>'+bagBadge(b)+'</div>'
         + '<div class="meta">'+kg(b.weight)+' · Filled: '+fmtDate(b.createdDate)+'</div>'
-        + (b.status==="sold" ? '<div class="meta">Sold to '+esc(b.buyerName||"—")+' · '+fmtDate(b.soldDate)+'</div>' : '')
+        + (b.status==="sold" ? '<div class="meta">Sold to '+esc(b.buyerName||"—")+' · ₹'+(+b.totalAmount||0).toFixed(2)+' · '+fmtDate(b.soldDate)+'</div>' : '')
         + '</div>';
     }).join("");
   }
@@ -1127,7 +1152,8 @@ function openBag(id){
     + f("Status", bagBadge(b));
   if(b.status==="sold"){
     h += f("Buyer", esc(b.buyerName||"—"))
-      + f("Buyer phone", esc(b.buyerPhone||"—"))
+      + f("Rate", "₹"+(+b.ratePerKg||0).toFixed(2)+" / kg")
+      + f("Total", "₹"+(+b.totalAmount||0).toFixed(2))
       + f("Sold date", fmtDate(b.soldDate));
   }
   h += '</div>'
@@ -1139,7 +1165,8 @@ function openBag(id){
     h += '<button class="btn" onclick="openSellForm(\''+esc(b.id)+'\')">💰 Sell bag</button>'
       + '<button class="btn ghost" onclick="openBagForm(\''+esc(b.id)+'\')">✏️ Edit</button>';
   }
-  h += '<button class="btn ghost" onclick="printBagLabel(\''+esc(b.id)+'\')">🖨️ Print QR</button>'
+  h += '<label style="display:flex;align-items:center;gap:6px;font-size:14px">Copies <input type="number" id="bg-copies" min="1" max="20" value="1" style="width:60px"></label>'
+    + '<button class="btn ghost" onclick="printBagLabel(\''+esc(b.id)+'\')">🖨️ Print QR</button>'
     + (isAdmin?'<button class="btn ghost" onclick="deleteBag(\''+esc(b.id)+'\')" style="color:var(--red)">🗑️ Delete</button>':"")
     + '<button class="btn ghost" onclick="closeModal(\'m-bag\')">Close</button></div>';
   $("m-bag-sheet").innerHTML = h;
@@ -1173,21 +1200,27 @@ async function saveBagForm(id){
 }
 function openSellForm(id){
   const b = findBag(id); if(!b) return;
+  const w = +b.weight||0;
   $("m-bag-sheet").innerHTML =
     '<h2>💰 Sell '+esc(b.id)+'</h2>'
-    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">'+kg(b.weight)+' · filled '+fmtDate(b.createdDate)+'</div>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">'+kg(w)+' · filled '+fmtDate(b.createdDate)+'</div>'
     + '<label>Buyer name</label><input id="s-buyer" placeholder="Wastage buyer name" autocapitalize="words">'
-    + '<label>Buyer phone</label><input id="s-phone" placeholder="Phone (optional)" inputmode="tel">'
+    + '<label>Rate per kg (₹)</label><input id="s-rate" type="number" step="0.01" min="0" inputmode="decimal" placeholder="e.g. 15" oninput="updSellTotal('+w+')">'
+    + '<div class="setrow" style="margin:10px 0"><span>Total amount</span><b id="s-total">₹0.00</b></div>'
     + '<label>Sold date</label><input id="s-date" type="date" value="'+todayISO()+'">'
-    + '<label>Notes</label><textarea id="s-notes" rows="2" placeholder="Rate, vehicle no, remarks…"></textarea>'
+    + '<label>Notes</label><textarea id="s-notes" rows="2" placeholder="Vehicle no, remarks…"></textarea>'
     + '<div class="btnrow"><button class="btn" onclick="saveSellForm(\''+esc(b.id)+'\')">💰 Mark sold</button>'
     + '<button class="btn ghost" onclick="openBag(\''+esc(b.id)+'\')">Back</button></div>';
   $("m-bag").classList.add("open");
 }
+function updSellTotal(w){
+  const r = parseFloat($("s-rate").value)||0;
+  $("s-total").textContent = "₹"+(w*r).toFixed(2);
+}
 async function saveSellForm(id){
   const data = {
     buyerName: $("s-buyer").value.trim(),
-    buyerPhone: $("s-phone").value.trim(),
+    ratePerKg: parseFloat($("s-rate").value)||0,
     soldDate: $("s-date").value||todayISO(),
     notes: $("s-notes").value.trim()
   };
@@ -1204,13 +1237,22 @@ async function deleteBag(id){
 }
 function printBagLabel(id){
   const b = findBag(id); if(!b) return;
+  const inp = $("bg-copies");
+  const copies = Math.min(20, Math.max(1, parseInt(inp&&inp.value)||1));
+  const preset = store.settings.labelPreset || "8";
   const pa = $("printArea");
-  pa.className = "sheet-"+(store.settings.labelPreset||"8");
-  pa.innerHTML = '<div class="labelpage"><div class="label"><div class="qr">'+qrSVG(rollQR(b.id))+'</div>'
-    + '<div class="t"><div class="id">'+esc(b.id)+'</div>'
-    + '<div class="ln">♻️ Wastage bag</div>'
-    + '<div class="ln">'+kg(b.weight)+'</div>'
-    + '<div class="ln"><b>Date:</b> '+fmtDate(b.createdDate)+'</div></div></div></div>';
+  pa.className = "sheet-"+preset;
+  if(preset==="custom") applyCustomLabelVars(pa);
+  const body = preset==="custom"
+    ? '<div class="t"><div class="id">'+esc(b.id)+'</div><div class="ln">'+kg(b.weight)+' · '+fmtDate(b.createdDate)+'</div></div>'
+    : '<div class="t"><div class="id">'+esc(b.id)+'</div>'
+      + '<div class="ln">♻️ Wastage bag</div>'
+      + '<div class="ln">'+kg(b.weight)+'</div>'
+      + '<div class="ln"><b>Date:</b> '+fmtDate(b.createdDate)+'</div></div>';
+  const one = '<div class="label"><div class="qr">'+qrSVG(rollQR(b.id))+'</div>'+body+'</div>';
+  let html = "";
+  for(let i=0;i<copies;i++) html += one;
+  pa.innerHTML = '<div class="labelpage">'+html+'</div>';
   setTimeout(()=>window.print(), 60);
 }
 
@@ -1237,7 +1279,10 @@ function renderBackup(){
     + '<div class="btnrow"><a class="btn small" href="/api/reports/stock.csv" style="text-decoration:none">📦 Stock report (CSV)</a></div>'
     + '<div class="grid2" style="margin-top:10px"><div><label>Cutting from</label><input type="date" id="rep-from"></div>'
     + '<div><label>Cutting to</label><input type="date" id="rep-to" value="'+todayISO()+'"></div></div>'
-    + '<div class="btnrow"><button class="btn small" onclick="downloadCutting()">✂️ Cutting report (CSV)</button></div></div>'
+    + '<div class="btnrow"><button class="btn small" onclick="downloadCutting()">✂️ Cutting report (CSV)</button></div>'
+    + '<div class="grid2" style="margin-top:10px"><div><label>Wastage from</label><input type="date" id="repw-from"></div>'
+    + '<div><label>Wastage to</label><input type="date" id="repw-to" value="'+todayISO()+'"></div></div>'
+    + '<div class="btnrow"><button class="btn small" onclick="downloadWastage()">♻️ Wastage report (CSV)</button></div></div>'
     + '<div class="card"><h3>👤 Account</h3>'
     + '<div style="margin-bottom:8px">Logged in as <b>'+esc(store.user?store.user.username:"")+'</b> ('+esc(store.user?store.user.role:"")+')</div>'
     + '<button class="btn ghost" onclick="doLogout()">Logout</button></div>'
@@ -1276,6 +1321,17 @@ async function saveSettings(){
 async function setLabelPreset(v){
   store.settings.labelPreset = v;
   try{ await api("PUT","/api/settings",{labelPreset:v}); }catch(e){}
+  renderLabels();
+}
+async function saveCustomSize(){
+  const d = {
+    labelCustomW: Math.max(10, parseFloat($("cs-w").value)||100),
+    labelCustomH: Math.max(10, parseFloat($("cs-h").value)||20),
+    labelCustomCols: Math.min(10, Math.max(1, parseInt($("cs-c").value)||2))
+  };
+  Object.assign(store.settings, d);
+  try{ await api("PUT","/api/settings",d); alert("Custom label size saved."); }
+  catch(e){ if(e.message!=="login") alert(e.message); }
 }
 function downloadSampleCSV(){
   const csv="fabricType,colour,dia,gsm,weight,manufacturer,createdDate,notes\nCotton Jersey,Black,34,180,25.5,ABC Processors,2026-10-04,Lot 9\n";
@@ -1298,6 +1354,10 @@ function importCSV(input){
 function downloadCutting(){
   const f=$("rep-from").value, t=$("rep-to").value;
   location.href="/api/reports/cutting.csv?from="+encodeURIComponent(f)+"&to="+encodeURIComponent(t);
+}
+function downloadWastage(){
+  const f=$("repw-from").value, t=$("repw-to").value;
+  location.href="/api/reports/wastage.csv?from="+encodeURIComponent(f)+"&to="+encodeURIComponent(t);
 }
 
 /* ---------- auth ---------- */

@@ -60,5 +60,7 @@ create table if not exists wastage_bags (
   buyer_name text default '',
   buyer_phone text default '',
   sold_date text default '',
-  notes text default ''
+  notes text default '',
+  rate_per_kg numeric default 0,
+  total_amount numeric default 0
 );

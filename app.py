@@ -363,5 +363,40 @@ def rep_cut():
                  "attachment; filename=godown-cutting-%s.csv" % time.strftime("%Y%m%d")})
 
 
+@app.route("/api/reports/wastage.csv")
+@login_required
+@with_db
+def rep_wastage():
+    frm = request.args.get("from", "")
+    to = request.args.get("to", "")
+    bags = db.get_wastage_bags()
+    if frm:
+        bags = [b for b in bags if (b["createdDate"] or "") >= frm]
+    if to:
+        bags = [b for b in bags if (b["createdDate"] or "") <= to]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Bag ID", "Weight kg", "Filled date", "Status", "Buyer name",
+                "Rate per kg (Rs)", "Total amount (Rs)", "Sold date", "Notes"])
+    in_kg = sold_kg = sale_total = 0.0
+    for b in bags:
+        w.writerow([b["id"], b["weight"], b["createdDate"], b["status"],
+                    b["buyerName"], b["ratePerKg"], b["totalAmount"],
+                    b["soldDate"], b["notes"]])
+        if b["status"] == "sold":
+            sold_kg += b["weight"]
+            sale_total += b["totalAmount"]
+        else:
+            in_kg += b["weight"]
+    w.writerow([])
+    w.writerow(["TOTAL in-stock kg", round(in_kg, 2)])
+    w.writerow(["TOTAL sold kg", round(sold_kg, 2)])
+    w.writerow(["TOTAL sale amount (Rs)", round(sale_total, 2)])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition":
+                 "attachment; filename=godown-wastage-%s.csv" % time.strftime("%Y%m%d")})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

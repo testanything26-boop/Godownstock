@@ -89,6 +89,10 @@ def _ensure_wastage_schema(c):
           "created_date text default '', status text default 'in-stock', "
           "buyer_name text default '', buyer_phone text default '', "
           "sold_date text default '', notes text default '')")
+    _q(c, "ALTER TABLE wastage_bags ADD COLUMN IF NOT EXISTS"
+          " rate_per_kg numeric default 0")
+    _q(c, "ALTER TABLE wastage_bags ADD COLUMN IF NOT EXISTS"
+          " total_amount numeric default 0")
 
 
 def _location_id(c, lid):
@@ -486,6 +490,8 @@ def _wastage(d):
         "status": d.get("status") or "in-stock",
         "buyerName": d.get("buyer_name") or "",
         "buyerPhone": d.get("buyer_phone") or "",
+        "ratePerKg": float(d.get("rate_per_kg") or 0),
+        "totalAmount": float(d.get("total_amount") or 0),
         "soldDate": d.get("sold_date") or "",
         "notes": d.get("notes") or "",
     }
@@ -574,9 +580,12 @@ def sell_wastage_bag(bid, data):
             raise ValueError("Bag is already sold")
         import datetime
         sold_date = data.get("soldDate") or datetime.date.today().isoformat()
-        _q(c, "UPDATE wastage_bags SET status='sold', buyer_name=%s, buyer_phone=%s,"
+        rate = round(float(data.get("ratePerKg") or 0), 2)
+        total = round(float(r["weight"] or 0) * rate, 2)
+        _q(c, "UPDATE wastage_bags SET status='sold', buyer_name=%s,"
+              " rate_per_kg=%s, total_amount=%s,"
               " sold_date=%s, notes=%s WHERE id=%s",
-           (buyer, (data.get("buyerPhone") or "").strip(), sold_date,
+           (buyer, rate, total, sold_date,
             data.get("notes", r["notes"]), bid))
         return _get_wastage(c, bid)
 
