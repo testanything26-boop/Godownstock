@@ -98,6 +98,7 @@ def state():
         "user": me(),
         "rolls": db.get_rolls(),
         "locations": db.list_locations(),
+        "wastage": db.get_wastage_bags(),
         "recentHistory": db.get_recent_history(),
         "settings": db.get_settings(),
     })
@@ -207,6 +208,56 @@ def rename_location(lid):
 def delete_location(lid):
     with write_lock:
         db.delete_location(lid)
+        return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------- wastage bags
+@app.route("/api/wastage", methods=["GET"])
+@login_required
+@with_db
+def list_wastage():
+    return jsonify(db.get_wastage_bags())
+
+
+@app.route("/api/wastage", methods=["POST"])
+@login_required
+@with_db
+def create_wastage():
+    with write_lock:
+        try:
+            return jsonify(db.create_wastage_bag(request.get_json(force=True)))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/wastage/<bid>", methods=["PUT"])
+@login_required
+@with_db
+def update_wastage(bid):
+    with write_lock:
+        try:
+            return jsonify(db.update_wastage_bag(bid, request.get_json(force=True)))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/wastage/<bid>/sell", methods=["POST"])
+@login_required
+@with_db
+def sell_wastage(bid):
+    with write_lock:
+        try:
+            return jsonify(db.sell_wastage_bag(bid, request.get_json(force=True)))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/wastage/<bid>", methods=["DELETE"])
+@admin_required
+@with_db
+def delete_wastage(bid):
+    with write_lock:
+        db.delete_wastage_bag(bid)
         return jsonify({"ok": True})
 
 

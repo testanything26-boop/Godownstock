@@ -368,6 +368,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
   <button data-v="rolls">🧵 Rolls</button>
   <button data-v="scan">📷 Scan</button>
   <button data-v="labels">🏷️ Labels</button>
+  <button data-v="wastage">♻️ Wastage</button>
   <button data-v="users" id="tab-users" style="display:none">👥 Users</button>
   <button data-v="backup">💾 Backup</button>
 </nav>
@@ -376,6 +377,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
   <section id="v-rolls" class="view"></section>
   <section id="v-scan" class="view"></section>
   <section id="v-labels" class="view"></section>
+  <section id="v-wastage" class="view"></section>
   <section id="v-backup" class="view"></section>
   <section id="v-users" class="view"></section>
   <section id="v-detail" class="view"></section>
@@ -384,6 +386,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <div class="modal" id="m-roll"><div class="sheet" id="m-roll-sheet"></div></div>
 <div class="modal" id="m-cut"><div class="sheet" id="m-cut-sheet"></div></div>
 <div class="modal" id="m-bulk"><div class="sheet" id="m-bulk-sheet"></div></div>
+<div class="modal" id="m-bag"><div class="sheet" id="m-bag-sheet"></div></div>
 
 <div id="loginOverlay" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:200;align-items:center;justify-content:center;padding:20px;">
   <div class="card" style="width:100%;max-width:380px;">
@@ -433,7 +436,7 @@ let APP_URL = "{{ app_url }}";
 if(APP_URL.charAt(0) === "{") APP_URL = ""; /* opened as plain file, not via server */
 
 /* ---------- server store ---------- */
-let store = { rolls:[], locations:[], settings:{lowKg:5, labelPreset:"8", companyName:"Chakra Production"}, user:null };
+let store = { rolls:[], locations:[], wastage:[], settings:{lowKg:5, labelPreset:"8", companyName:"Chakra Production"}, user:null };
 
 async function api(method, path, body){
   const opt = { method:method, headers:{}, cache:"no-store" }; /* never serve API data from browser cache */
@@ -448,6 +451,7 @@ async function refreshState(){
   const d = await api("GET","/api/state");
   store.rolls = d.rolls||[];
   store.locations = d.locations||[];
+  store.wastage = d.wastage||[];
   store.recentHistory = d.recentHistory||[];
   store.settings = Object.assign({lowKg:5, labelPreset:"8", companyName:"Chakra Production"}, d.settings||{});
   store.user = d.user;
@@ -494,6 +498,7 @@ function go(view){
   if(view==="rolls") renderRolls();
   if(view==="scan") renderScan();
   if(view==="labels") renderLabels();
+  if(view==="wastage") renderWastage();
   if(view==="users") renderUsers();
   if(view==="backup") renderBackup();
   if(view==="detail") renderDetail();
@@ -856,7 +861,7 @@ document.querySelectorAll(".modal").forEach(m=>m.addEventListener("click", e=>{ 
 let scanStream=null, scanRAF=null, scanActive=false;
 function renderScan(){
   $("v-scan").innerHTML =
-    '<div class="card"><h3>📷 Scan roll QR</h3>'
+    '<div class="card"><h3>📷 Scan roll / bag QR</h3>'
     + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Point the camera at the QR label stuck on the roll. The roll opens instantly for logging cutting.</div>'
     + '<div class="scanframe"><video id="scanvideo" playsinline muted></video><div class="scanbox" id="scanbox"></div></div>'
     + '<canvas id="scancanvas" style="display:none"></canvas>'
@@ -864,7 +869,7 @@ function renderScan(){
     + '<button class="btn ghost" id="scanstop" onclick="stopScanner()" style="display:none">⏹ Stop</button></div>'
     + '<div id="scanmsg" style="margin-top:8px;font-size:13px;color:var(--muted)"></div></div>'
     + '<div class="card"><h3>⌨️ Or enter roll ID manually</h3>'
-    + '<div class="searchrow"><input id="scanmanual" placeholder="e.g. R-0001" autocapitalize="characters">'
+    + '<div class="searchrow"><input id="scanmanual" placeholder="e.g. R-0001 or W-0001" autocapitalize="characters">'
     + '<button class="btn" onclick="manualScan()">Go</button></div>'
     + '<div style="color:var(--muted);font-size:12px">Camera needs the page opened over <b>https://</b> or <b>localhost</b> — phone browsers block the camera on plain files. Manual entry always works.</div></div>';
 }
@@ -880,6 +885,7 @@ async function manualScan(){
 async function handleScannedId(id, fromCamera){
   try{ await refreshState(); }
   catch(e){ if(e.message==="login"){ showLogin(); return; } }
+  if(findBag(id)){ openBag(id); return; }
   if(findRoll(id)){ openRoll(id); return; }
   if(confirm("Roll "+id+" is not in the database.\n(It may be a label from the old app, or added on another phone - data was just refreshed.)\n\nCreate it now with ID "+id+"?")){
     openRollForm();
@@ -1074,6 +1080,137 @@ function printLabels(ids){
   let html = "";
   rolls.forEach(r=>{ for(let i=0;i<copies;i++) html += one(r); });
   pa.innerHTML = '<div class="labelpage">' + html + '</div>';
+  setTimeout(()=>window.print(), 60);
+}
+
+/* ---------- wastage bags ---------- */
+function findBag(id){ return store.wastage.find(b=>b.id===String(id).trim().toUpperCase()); }
+function bagBadge(b){
+  return b.status==="sold"
+    ? '<span class="badge b-exhausted">Sold</span>'
+    : '<span class="badge b-instock">In stock</span>';
+}
+function renderWastage(){
+  const box = $("v-wastage");
+  const inStock = store.wastage.filter(b=>b.status!=="sold");
+  const sold = store.wastage.filter(b=>b.status==="sold");
+  const totalKg = inStock.reduce((a,b)=>a+(+b.weight||0),0);
+  let h = '<div class="kpis">'
+    + '<div class="kpi k1"><div class="kico">♻️</div><div class="n">'+inStock.length+'</div><div class="l">Bags in stock</div></div>'
+    + '<div class="kpi k2"><div class="kico">⚖️</div><div class="n">'+kg(totalKg)+'</div><div class="l">Wastage in stock</div></div>'
+    + '<div class="kpi k3"><div class="kico">💰</div><div class="n">'+sold.length+'</div><div class="l">Bags sold</div></div>'
+    + '</div>';
+  h += '<div class="card"><div class="btnrow"><button class="btn" onclick="openBagForm()">+ Add wastage bag</button></div>'
+    + '<div style="color:var(--muted);font-size:13px">Weigh the wastage bag, add it here, print its QR label and stick it on the bag.</div></div>';
+  const list = store.wastage.slice().sort((a,b)=>String(b.createdDate).localeCompare(String(a.createdDate)));
+  if(!list.length){
+    h += '<div class="empty"><div class="big">♻️</div>No wastage bags yet.</div>';
+  } else {
+    h += list.map(b=>{
+      return '<div class="rollcard" onclick="openBag(\''+esc(b.id)+'\')">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center"><span class="rid">'+esc(b.id)+'</span>'+bagBadge(b)+'</div>'
+        + '<div class="meta">'+kg(b.weight)+' · Filled: '+fmtDate(b.createdDate)+'</div>'
+        + (b.status==="sold" ? '<div class="meta">Sold to '+esc(b.buyerName||"—")+' · '+fmtDate(b.soldDate)+'</div>' : '')
+        + '</div>';
+    }).join("");
+  }
+  box.innerHTML = h;
+}
+function openBag(id){
+  const b = findBag(id); if(!b) return;
+  const isAdmin = store.user && store.user.role==="admin";
+  const f = (k,v)=>'<div class="f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
+  let h = '<h2>♻️ '+esc(b.id)+'</h2>'
+    + '<div class="detail-grid">'
+    + f("Weight", kg(b.weight))
+    + f("Filled date", fmtDate(b.createdDate))
+    + f("Status", bagBadge(b));
+  if(b.status==="sold"){
+    h += f("Buyer", esc(b.buyerName||"—"))
+      + f("Buyer phone", esc(b.buyerPhone||"—"))
+      + f("Sold date", fmtDate(b.soldDate));
+  }
+  h += '</div>'
+    + (b.notes?'<div style="color:var(--muted);font-size:13px;margin-bottom:8px">📝 '+esc(b.notes)+'</div>':"")
+    + '<div class="qrbox" style="margin-bottom:12px">'+qrSVG(rollQR(b.id))+'</div>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Scan this QR with the Scan tab to open this bag.</div>'
+    + '<div class="btnrow">';
+  if(b.status!=="sold"){
+    h += '<button class="btn" onclick="openSellForm(\''+esc(b.id)+'\')">💰 Sell bag</button>'
+      + '<button class="btn ghost" onclick="openBagForm(\''+esc(b.id)+'\')">✏️ Edit</button>';
+  }
+  h += '<button class="btn ghost" onclick="printBagLabel(\''+esc(b.id)+'\')">🖨️ Print QR</button>'
+    + (isAdmin?'<button class="btn ghost" onclick="deleteBag(\''+esc(b.id)+'\')" style="color:var(--red)">🗑️ Delete</button>':"")
+    + '<button class="btn ghost" onclick="closeModal(\'m-bag\')">Close</button></div>';
+  $("m-bag-sheet").innerHTML = h;
+  $("m-bag").classList.add("open");
+}
+function openBagForm(id){
+  const b = id ? findBag(id) : null;
+  const isNew = !b;
+  $("m-bag-sheet").innerHTML =
+    '<h2>'+(isNew?"➕ Add wastage bag":"✏️ Edit bag "+esc(b.id))+'</h2>'
+    + '<label>Bag ID</label><input id="g-id" value="'+esc(b?b.id:"")+'" '+(isNew?"":"readonly")+' placeholder="Leave blank — auto ID" autocapitalize="characters">'
+    + '<label>Weight (kg)</label><input id="g-weight" type="number" step="0.01" inputmode="decimal" value="'+esc(b?b.weight:"")+'" placeholder="e.g. 12.5">'
+    + '<label>Filled date</label><input id="g-date" type="date" value="'+esc(b?b.createdDate:todayISO())+'">'
+    + '<label>Notes</label><textarea id="g-notes" rows="2" placeholder="Remarks…">'+esc(b?b.notes:"")+'</textarea>'
+    + '<div class="btnrow"><button class="btn" onclick="saveBagForm('+(isNew?"null":"'"+esc(b.id)+"'")+')">💾 Save bag</button>'
+    + '<button class="btn ghost" onclick="closeModal(\'m-bag\')">Cancel</button></div>';
+  $("m-bag").classList.add("open");
+}
+async function saveBagForm(id){
+  const data = {
+    weight: parseFloat($("g-weight").value)||0,
+    createdDate: $("g-date").value||todayISO(),
+    notes: $("g-notes").value.trim()
+  };
+  if(!id){ const v=$("g-id").value.trim().toUpperCase(); if(v) data.id=v; }
+  try{
+    if(id) await api("PUT","/api/wastage/"+encodeURIComponent(id),data);
+    else await api("POST","/api/wastage",data);
+    closeModal("m-bag"); await refreshState(); renderWastage();
+  }catch(e){ if(e.message!=="login") alert(e.message); }
+}
+function openSellForm(id){
+  const b = findBag(id); if(!b) return;
+  $("m-bag-sheet").innerHTML =
+    '<h2>💰 Sell '+esc(b.id)+'</h2>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">'+kg(b.weight)+' · filled '+fmtDate(b.createdDate)+'</div>'
+    + '<label>Buyer name</label><input id="s-buyer" placeholder="Wastage buyer name" autocapitalize="words">'
+    + '<label>Buyer phone</label><input id="s-phone" placeholder="Phone (optional)" inputmode="tel">'
+    + '<label>Sold date</label><input id="s-date" type="date" value="'+todayISO()+'">'
+    + '<label>Notes</label><textarea id="s-notes" rows="2" placeholder="Rate, vehicle no, remarks…"></textarea>'
+    + '<div class="btnrow"><button class="btn" onclick="saveSellForm(\''+esc(b.id)+'\')">💰 Mark sold</button>'
+    + '<button class="btn ghost" onclick="openBag(\''+esc(b.id)+'\')">Back</button></div>';
+  $("m-bag").classList.add("open");
+}
+async function saveSellForm(id){
+  const data = {
+    buyerName: $("s-buyer").value.trim(),
+    buyerPhone: $("s-phone").value.trim(),
+    soldDate: $("s-date").value||todayISO(),
+    notes: $("s-notes").value.trim()
+  };
+  if(!data.buyerName){ alert("Enter the buyer name"); return; }
+  try{
+    await api("POST","/api/wastage/"+encodeURIComponent(id)+"/sell",data);
+    closeModal("m-bag"); await refreshState(); renderWastage();
+  }catch(e){ if(e.message!=="login") alert(e.message); }
+}
+async function deleteBag(id){
+  if(!confirm("Delete wastage bag "+id+"? This cannot be undone.")) return;
+  try{ await api("DELETE","/api/wastage/"+encodeURIComponent(id)); closeModal("m-bag"); await refreshState(); renderWastage(); }
+  catch(e){ if(e.message!=="login") alert(e.message); }
+}
+function printBagLabel(id){
+  const b = findBag(id); if(!b) return;
+  const pa = $("printArea");
+  pa.className = "sheet-"+(store.settings.labelPreset||"8");
+  pa.innerHTML = '<div class="labelpage"><div class="label"><div class="qr">'+qrSVG(rollQR(b.id))+'</div>'
+    + '<div class="t"><div class="id">'+esc(b.id)+'</div>'
+    + '<div class="ln">♻️ Wastage bag</div>'
+    + '<div class="ln">'+kg(b.weight)+'</div>'
+    + '<div class="ln"><b>Date:</b> '+fmtDate(b.createdDate)+'</div></div></div></div>';
   setTimeout(()=>window.print(), 60);
 }
 

@@ -50,3 +50,15 @@ create table if not exists locations (
 );
 alter table rolls add column if not exists location_id integer references locations(id);
 -- company name lives in meta under key 'companyName' (app defaults to 'Chakra Production').
+
+-- v2.2: wastage bags (safe to re-run; the app also auto-applies this on login).
+create table if not exists wastage_bags (
+  id text primary key,
+  weight numeric default 0,
+  created_date text default '',
+  status text default 'in-stock',
+  buyer_name text default '',
+  buyer_phone text default '',
+  sold_date text default '',
+  notes text default ''
+);

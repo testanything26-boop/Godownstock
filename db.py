@@ -82,6 +82,15 @@ def _ensure_location_schema(c):
           " location_id integer REFERENCES locations(id)")
 
 
+def _ensure_wastage_schema(c):
+    """Idempotent migration for wastage bags (v2.2)."""
+    _q(c, "CREATE TABLE IF NOT EXISTS wastage_bags ("
+          "id text primary key, weight numeric default 0, "
+          "created_date text default '', status text default 'in-stock', "
+          "buyer_name text default '', buyer_phone text default '', "
+          "sold_date text default '', notes text default '')")
+
+
 def _location_id(c, lid):
     """Validate an incoming location id; returns int or None."""
     if lid in (None, "", 0, "0"):
@@ -136,6 +145,7 @@ def ensure_seed():
     ap = os.environ.get("ADMIN_PASS", "").strip()
     with _conn() as c:
         _ensure_location_schema(c)
+        _ensure_wastage_schema(c)
         n = _q(c, "SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         if n == 0:
             if not ap:
@@ -465,6 +475,116 @@ def delete_location(lid):
         _ensure_location_schema(c)
         _q(c, "UPDATE rolls SET location_id=NULL WHERE location_id=%s", (lid,))
         _q(c, "DELETE FROM locations WHERE id=%s", (lid,))
+
+
+# ---------------------------------------------------------------- wastage bags
+def _wastage(d):
+    return {
+        "id": d["id"],
+        "weight": float(d.get("weight") or 0),
+        "createdDate": d.get("created_date") or "",
+        "status": d.get("status") or "in-stock",
+        "buyerName": d.get("buyer_name") or "",
+        "buyerPhone": d.get("buyer_phone") or "",
+        "soldDate": d.get("sold_date") or "",
+        "notes": d.get("notes") or "",
+    }
+
+
+def _next_wastage_id(c):
+    import re
+    r = _q(c, "SELECT value FROM meta WHERE key='wastage_seq'").fetchone()
+    seq = int(r["value"]) if r else 0
+    m = 0
+    for row in _q(c, "SELECT id FROM wastage_bags WHERE id LIKE 'W-%%'").fetchall():
+        mm = re.match(r"^W-(\d+)$", (row["id"] or "").upper())
+        if mm:
+            m = max(m, int(mm.group(1)))
+    seq = max(seq, m) + 1
+    while True:
+        bid = "W-%04d" % seq
+        if not _q(c, "SELECT 1 FROM wastage_bags WHERE id=%s", (bid,)).fetchone():
+            break
+        seq += 1
+    _q(c, "INSERT INTO meta(key, value) VALUES ('wastage_seq', %s) "
+           "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (str(seq),))
+    return bid
+
+
+def _get_wastage(c, bid):
+    r = _q(c, "SELECT * FROM wastage_bags WHERE id=%s", (bid,)).fetchone()
+    return _wastage(r) if r else None
+
+
+def get_wastage_bags():
+    with _conn() as c:
+        _ensure_wastage_schema(c)
+        rs = _q(c, "SELECT * FROM wastage_bags ORDER BY id").fetchall()
+    return [_wastage(r) for r in rs]
+
+
+def create_wastage_bag(data):
+    data = data or {}
+    weight = round(float(data.get("weight") or 0), 2)
+    if weight <= 0:
+        raise ValueError("Weight must be above 0")
+    with _conn() as c:
+        _ensure_wastage_schema(c)
+        bid = (data.get("id") or "").strip().upper()
+        if bid:
+            if _q(c, "SELECT 1 FROM wastage_bags WHERE id=%s", (bid,)).fetchone():
+                raise ValueError("Bag ID %s already exists" % bid)
+        else:
+            bid = _next_wastage_id(c)
+        _q(c, "INSERT INTO wastage_bags(id, weight, created_date, status, notes)"
+              " VALUES (%s,%s,%s,'in-stock',%s)",
+           (bid, weight, data.get("createdDate", ""), data.get("notes", "")))
+        return _get_wastage(c, bid)
+
+
+def update_wastage_bag(bid, data):
+    data = data or {}
+    with _conn() as c:
+        _ensure_wastage_schema(c)
+        r = _q(c, "SELECT * FROM wastage_bags WHERE id=%s", (bid,)).fetchone()
+        if not r:
+            raise ValueError("Bag not found")
+        if r["status"] == "sold":
+            raise ValueError("Bag is already sold — it cannot be edited")
+        weight = round(float(data.get("weight", r["weight"]) or 0), 2)
+        if weight <= 0:
+            raise ValueError("Weight must be above 0")
+        _q(c, "UPDATE wastage_bags SET weight=%s, created_date=%s, notes=%s WHERE id=%s",
+           (weight, data.get("createdDate", r["created_date"]),
+            data.get("notes", r["notes"]), bid))
+        return _get_wastage(c, bid)
+
+
+def sell_wastage_bag(bid, data):
+    data = data or {}
+    buyer = (data.get("buyerName") or "").strip()
+    if not buyer:
+        raise ValueError("Buyer name is required")
+    with _conn() as c:
+        _ensure_wastage_schema(c)
+        r = _q(c, "SELECT * FROM wastage_bags WHERE id=%s", (bid,)).fetchone()
+        if not r:
+            raise ValueError("Bag not found")
+        if r["status"] == "sold":
+            raise ValueError("Bag is already sold")
+        import datetime
+        sold_date = data.get("soldDate") or datetime.date.today().isoformat()
+        _q(c, "UPDATE wastage_bags SET status='sold', buyer_name=%s, buyer_phone=%s,"
+              " sold_date=%s, notes=%s WHERE id=%s",
+           (buyer, (data.get("buyerPhone") or "").strip(), sold_date,
+            data.get("notes", r["notes"]), bid))
+        return _get_wastage(c, bid)
+
+
+def delete_wastage_bag(bid):
+    with _conn() as c:
+        _ensure_wastage_schema(c)
+        _q(c, "DELETE FROM wastage_bags WHERE id=%s", (bid,))
 
 
 # ---------------------------------------------------------------- settings
