@@ -357,6 +357,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
   #printArea.sheet-custom.thermal .labelpage{display:block; padding:0;}
   #printArea.sheet-custom.thermal .label{page-break-after:always; break-after:page;}
   #printArea.sheet-custom.thermal .label:last-child{page-break-after:auto; break-after:auto;}
+  #printArea.sheet-custom.thermal .label{border:none; border-radius:0; padding:1mm;}
   #printArea.sheet-custom .label{width:var(--lbl-w,100mm); height:var(--lbl-h,20mm); border:1px solid #000; border-radius:1mm; padding:1.5mm; display:flex; gap:2mm; align-items:center; page-break-inside:avoid; overflow:hidden;}
   #printArea.sheet-custom .label .qr svg{width:var(--lbl-qr,15mm); height:var(--lbl-qr,15mm);}
   #printArea.sheet-custom .label .t .id{font-size:9pt;}
@@ -1033,7 +1034,7 @@ function renderLabels(){
     + '<div><label>Select all inwarded on</label><div class="searchrow"><input type="date" id="lb-date" value="'+todayISO()+'">'
     + '<button class="btn small" onclick="labelSelectDate()">Select</button></div></div></div>'
     + '<div id="customSizeBox" style="'+(preset==="custom"?"":"display:none")+'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
-    + '<div style="font-weight:700;margin-bottom:8px">Custom label size <span style="font-weight:400;font-size:11px;color:#888">v2.4</span></div>'
+    + '<div style="font-weight:700;margin-bottom:8px">Custom label size <span style="font-weight:400;font-size:11px;color:#888">v2.5</span></div>'
     + '<div class="grid2"><div><label>Width (mm)</label><input type="number" id="cs-w" min="10" step="1" value="'+(store.settings.labelCustomW||100)+'"></div>'
     + '<div><label>Height (mm)</label><input type="number" id="cs-h" min="10" step="1" value="'+(store.settings.labelCustomH||20)+'"></div>'
     + '<div><label>Labels per row</label><input type="number" id="cs-c" min="1" max="10" step="1" value="'+(store.settings.labelCustomCols||2)+'"></div>'
