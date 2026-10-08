@@ -623,6 +623,7 @@ def get_settings():
             "labelCustomW": _f("labelCustomW", 100),
             "labelCustomH": _f("labelCustomH", 20),
             "labelCustomCols": _i("labelCustomCols", 2),
+            "labelCustomRows": _i("labelCustomRows", 0),
             "labelQrMm": _f("labelQrMm", 0)}
 
 
@@ -642,7 +643,7 @@ def set_settings(d):
                    " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
                (str(d["companyName"] or "").strip() or "Chakra Production",))
         for _k in ("labelCustomW", "labelCustomH", "labelCustomCols",
-                   "labelQrMm"):
+                   "labelCustomRows", "labelQrMm"):
             if _k in d:
                 _q(c, "INSERT INTO meta(key, value) VALUES (%s, %s)"
                        " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
