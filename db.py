@@ -605,8 +605,25 @@ def get_settings():
         low = float(m.get("lowKg", 5))
     except ValueError:
         low = 5
+
+    def _f(key, default):
+        try:
+            return float(m.get(key, default))
+        except (ValueError, TypeError):
+            return default
+
+    def _i(key, default):
+        try:
+            return int(float(m.get(key, default)))
+        except (ValueError, TypeError):
+            return default
+
     return {"lowKg": low, "labelPreset": m.get("labelPreset", "8"),
-            "companyName": m.get("companyName", "Chakra Production")}
+            "companyName": m.get("companyName", "Chakra Production"),
+            "labelCustomW": _f("labelCustomW", 100),
+            "labelCustomH": _f("labelCustomH", 20),
+            "labelCustomCols": _i("labelCustomCols", 2),
+            "labelQrMm": _f("labelQrMm", 0)}
 
 
 def set_settings(d):
@@ -624,3 +641,9 @@ def set_settings(d):
             _q(c, "INSERT INTO meta(key, value) VALUES ('companyName', %s)"
                    " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
                (str(d["companyName"] or "").strip() or "Chakra Production",))
+        for _k in ("labelCustomW", "labelCustomH", "labelCustomCols",
+                   "labelQrMm"):
+            if _k in d:
+                _q(c, "INSERT INTO meta(key, value) VALUES (%s, %s)"
+                       " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+                   (_k, str(d[_k])))
