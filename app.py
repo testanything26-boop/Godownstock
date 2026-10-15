@@ -211,6 +211,25 @@ def delete_location(lid):
         return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------- erase all data (admin)
+@app.route("/api/admin/erase-preview")
+@admin_required
+@with_db
+def erase_preview():
+    return jsonify(db.erase_preview())
+
+
+@app.route("/api/admin/erase-all", methods=["POST"])
+@admin_required
+@with_db
+def erase_all():
+    with write_lock:
+        body = request.get_json(force=True) or {}
+        if body.get("confirm") != "ERASE":
+            return jsonify({"error": "Type ERASE to confirm."}), 400
+        return jsonify({"ok": True, "erased": db.erase_all_data()})
+
+
 # ---------------------------------------------------------------- wastage bags
 @app.route("/api/wastage", methods=["GET"])
 @login_required

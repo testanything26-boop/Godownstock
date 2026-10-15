@@ -358,6 +358,36 @@ def delete_roll(rid):
         _q(c, "DELETE FROM rolls WHERE id=%s", (rid,))
 
 
+def erase_preview():
+    with _conn() as c:
+        return {
+            "rolls": _q(c, "SELECT COUNT(*) AS n FROM rolls").fetchone()["n"],
+            "history": _q(c, "SELECT COUNT(*) AS n FROM history").fetchone()["n"],
+            "bags": _q(c, "SELECT COUNT(*) AS n FROM wastage_bags").fetchone()["n"],
+            "locations": _q(c, "SELECT COUNT(*) AS n FROM locations").fetchone()["n"],
+        }
+
+
+def erase_all_data():
+    # Wipe every transactional record for a fresh start. Keeps users (so the
+    # admin can still log in) and all other meta settings (company name,
+    # label preset, low-stock threshold). Deleting the roll_seq / wastage_seq
+    # keys resets numbering: next roll is R-0001, next bag is W-0001.
+    with _conn() as c:
+        counts = {
+            "rolls": _q(c, "SELECT COUNT(*) AS n FROM rolls").fetchone()["n"],
+            "history": _q(c, "SELECT COUNT(*) AS n FROM history").fetchone()["n"],
+            "bags": _q(c, "SELECT COUNT(*) AS n FROM wastage_bags").fetchone()["n"],
+            "locations": _q(c, "SELECT COUNT(*) AS n FROM locations").fetchone()["n"],
+        }
+        _q(c, "DELETE FROM history")
+        _q(c, "DELETE FROM rolls")
+        _q(c, "DELETE FROM wastage_bags")
+        _q(c, "DELETE FROM locations")
+        _q(c, "DELETE FROM meta WHERE key IN ('roll_seq', 'wastage_seq')")
+        return counts
+
+
 def get_rolls():
     with _conn() as c:
         _ensure_location_schema(c)

@@ -1316,6 +1316,13 @@ function renderBackup(){
     + '<div class="grid2" style="margin-top:10px"><div><label>Wastage from</label><input type="date" id="repw-from"></div>'
     + '<div><label>Wastage to</label><input type="date" id="repw-to" value="'+todayISO()+'"></div></div>'
     + '<div class="btnrow"><button class="btn small" onclick="downloadWastage()">♻️ Wastage report (CSV)</button></div></div>'
+    + '<div class="card" style="border-color:var(--red)"><h3>🗑️ Erase all data</h3>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Deletes <b>every</b> roll, cutting history entry, wastage bag and godown, and resets numbering so the next roll is R-0001 and the next bag is W-0001. Logins, company name and settings are kept. <b>This cannot be undone.</b> Download the Stock, Cutting and Wastage CSV reports above first.</div>'
+    + (isAdmin?'<div id="erase-preview" style="font-size:13px;margin-bottom:8px"></div>'
+    + '<div class="btnrow"><button class="btn ghost small" onclick="showErasePreview()">Show what will be erased</button></div>'
+    + '<div class="btnrow"><input id="erase-confirm" placeholder="Type ERASE to confirm" style="flex:1"><button class="btn small" style="background:var(--red);color:#fff" onclick="eraseAllData()">Erase everything</button></div>'
+    + '<div id="erase-result" style="font-size:13px;margin-top:8px"></div>'
+    :'<div style="color:var(--muted);font-size:13px">Only admins can erase data.</div>')+'</div>'
     + '<div class="card"><h3>👤 Account</h3>'
     + '<div style="margin-bottom:8px">Logged in as <b>'+esc(store.user?store.user.username:"")+'</b> ('+esc(store.user?store.user.role:"")+')</div>'
     + '<button class="btn ghost" onclick="doLogout()">Logout</button></div>'
@@ -1344,6 +1351,23 @@ async function deleteLocation(id){
   if(!confirm("Delete godown '"+l.name+"'? Rolls there will show no location.")) return;
   try{ await api("DELETE","/api/locations/"+id); await refreshState(); renderBackup(); }
   catch(e){ alert(e.message); }
+}
+async function showErasePreview(){
+  try{
+    const d = await api("GET","/api/admin/erase-preview");
+    $("erase-preview").innerHTML = "This will erase: <b>"+d.rolls+" rolls</b>, <b>"+d.history+" cutting history entries</b>, <b>"+d.bags+" wastage bags</b>, <b>"+d.locations+" godowns</b>. Numbering resets to R-0001 / W-0001.";
+  }catch(e){ $("erase-preview").textContent = "Could not load counts: "+e.message; }
+}
+async function eraseAllData(){
+  const typed = ($("erase-confirm").value||"").trim();
+  if(typed !== "ERASE"){ alert("Type ERASE in the box to confirm."); return; }
+  if(!confirm("Erase EVERYTHING? All rolls, cutting history, wastage bags and godowns will be deleted. This cannot be undone.")) return;
+  try{
+    const d = await api("POST","/api/admin/erase-all",{confirm:"ERASE"});
+    alert("Erased: "+d.erased.rolls+" rolls, "+d.erased.history+" history entries, "+d.erased.bags+" bags, "+d.erased.locations+" godowns. Fresh start — next roll R-0001, next bag W-0001.");
+    $("erase-confirm").value = "";
+    await refreshState(); renderBackup();
+  }catch(e){ $("erase-result").textContent = "Erase failed: "+e.message; }
 }
 async function saveSettings(){
   try{
