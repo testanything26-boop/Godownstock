@@ -1,0 +1,35 @@
+ROLLIX — DEPLOY CHECKLIST (read this before every update)
+==========================================================
+
+THE GOLDEN RULE: a version is ONE SET of files. Never deploy part of a set.
+
+Files in this package — upload ALL of them, together, in ONE GitHub commit:
+  1. index.html
+  2. app.py
+  3. db.py
+  4. schema.sql
+(DEPLOY.txt itself does not need uploading.)
+
+STEPS
+  1. GitHub repo (Godownstock) -> Add file -> Upload files.
+  2. Drag in ALL FOUR files above at once. Commit them together.
+  3. Open Render and wait until the deploy finishes ("Live").
+  4. Open the app and hard-refresh (phone: pull to refresh / reopen the tab;
+     computer: Cmd+Shift+R).
+  5. CHECK: the Home tab must show your real totals and NO red
+     "Server app is outdated" banner.
+       - Banner gone + totals correct  -> deploy is complete.
+       - Banner still there            -> a file from the set is missing.
+                                          Re-upload ALL FOUR files again.
+
+STAFF PHONE SHOWS THE BANNER BUT ADMIN DOES NOT?
+  The server is fine — that phone is holding a cached old page.
+  On that phone: close the app/tab fully and reopen the site.
+  If it persists: browser Settings -> Site settings ->
+  godownstock.onrender.com -> Clear & reset, then reopen.
+  (v2.9+ serves the page with no-store headers, so once every phone has
+  loaded v2.9 once, stale pages stop happening.)
+
+BEFORE using "Erase all data" (Backup tab, admin only):
+  Download the Stock, Cutting and Wastage CSV reports first.
+  Erasing cannot be undone.

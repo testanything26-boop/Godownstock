@@ -68,7 +68,16 @@ def index():
               os.path.join(base, "templates", "index.html")):
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
-                return f.read().replace("{{ app_url }}", APP_URL)
+                html = f.read().replace("{{ app_url }}", APP_URL)
+            # Never let a browser (especially a phone or home-screen app)
+            # keep a stale copy of the page across deploys: a cached old
+            # page against a new server caused the false "server outdated"
+            # warning on staff phones (fixed in v2.9).
+            resp = Response(html, mimetype="text/html")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+            return resp
     return ("index.html is missing — upload it to the repo root "
             "(Add file → Upload files)."), 500
 

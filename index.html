@@ -462,7 +462,8 @@ async function refreshState(){
   store.rolls = d.rolls||[];
   store.locations = d.locations||[];
   store.wastage = d.wastage||[];
-  store.recentHistory = d.recentHistory||[];
+  if("recentHistory" in d) store.recentHistory = d.recentHistory||[];
+  else delete store.recentHistory; /* old server: keep the key absent so the outdated warning stays truthful */
   store.settings = Object.assign({lowKg:5, labelPreset:"8", labelCustomW:100, labelCustomH:20, labelCustomCols:2, labelCustomRows:0, labelQrMm:0, companyName:"Chakra Production"}, d.settings||{});
   store.user = d.user;
   const hs = $("hdr-sub"); if(hs) hs.textContent = (store.settings.companyName||"Chakra Production") + " · Fabric roll QR manager";
