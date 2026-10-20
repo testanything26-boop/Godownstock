@@ -72,6 +72,19 @@ def _q(c, sql, params=()):
     return cur
 
 
+def _meta_set(c, key, value):
+    """Portable meta upsert (UPDATE, INSERT if absent).
+
+    The previous INSERT ... ON CONFLICT form silently depends on the live
+    meta table having a primary key on `key`; where it does not, Postgres
+    raises a non-ValueError and the caller dies with a bare HTTP 500 (this
+    broke bulk roll entry). UPDATE-then-INSERT works either way. Safe
+    under the app's single worker + write lock."""
+    cur = _q(c, "UPDATE meta SET value=%s WHERE key=%s", (str(value), key))
+    if cur.rowcount == 0:
+        _q(c, "INSERT INTO meta(key, value) VALUES (%s, %s)", (key, str(value)))
+
+
 def _ensure_location_schema(c):
     """Idempotent migration for the multi-godown feature (v2.1): locations
     table + rolls.location_id. Runs on every login via ensure_seed, so
@@ -216,8 +229,7 @@ def _next_id(c):
         rid = "R-%04d" % seq
         if not _q(c, "SELECT 1 FROM rolls WHERE id=%s", (rid,)).fetchone():
             break
-    _q(c, "INSERT INTO meta(key, value) VALUES ('roll_seq', %s) "
-           "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (str(seq),))
+    _meta_set(c, "roll_seq", seq)
     # if the caller supplied a custom id like R-0100, keep the counter ahead
     return rid, seq
 
@@ -230,8 +242,7 @@ def _bump_seq_for(c, rid):
     n = int(m.group(1))
     r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
     if not r or int(r["value"]) < n:
-        _q(c, "INSERT INTO meta(key, value) VALUES ('roll_seq', %s) "
-               "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (str(n),))
+        _meta_set(c, "roll_seq", n)
 
 
 def _get_roll(c, rid):
@@ -275,22 +286,61 @@ def bulk_create(data):
     rows = (data or {}).get("rolls") or []
     if not 1 <= len(rows) <= 500:
         raise ValueError("Give 1–500 rolls")
-    ids = []
+    # Validate every weight BEFORE touching the database, naming the roll
+    # position so one bad line in a pasted list is easy to find and fix.
+    weights = []
+    for i, r in enumerate(rows, 1):
+        try:
+            w = round(float(r.get("weight") or 0), 2)
+        except (TypeError, ValueError):
+            raise ValueError("Roll %d: weight is not a number" % i)
+        if w <= 0:
+            raise ValueError("Roll %d: every roll needs a weight above 0" % i)
+        weights.append(w)
     with _conn() as c:
-        loc = _location_id(c, (data or {}).get("locationId"))
-        for r in rows:
-            weight = round(float(r.get("weight") or 0), 2)
-            if weight <= 0:
-                raise ValueError("Every roll needs a weight above 0")
-            rid, _ = _next_id(c)
-            _q(c, "INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
-                  " manufacturer, created_date, status, styles, last_used_date, notes, location_id)"
-                  " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)",
-               (rid, r.get("fabricType", ""), r.get("color", ""), r.get("dia", ""),
-                r.get("gsm", ""), weight, weight, r.get("manufacturer", ""),
-                r.get("createdDate", ""), r.get("notes", ""), loc))
-            _add_history(c, rid, r.get("createdDate", ""), "created", "", 0, weight, "Roll created (bulk inward)")
-            ids.append(rid)
+        # The bulk form sends locationId on every roll; the CSV importer
+        # sends it at the top level. Accept either.
+        loc_src = (data or {}).get("locationId")
+        if loc_src is None and rows:
+            loc_src = rows[0].get("locationId")
+        loc = _location_id(c, loc_src)
+        # Fast batch path (v2.11): allocate ALL ids in one pass — read the
+        # counter and the existing R-numbers once, hand out numbers in
+        # memory, save the counter once — then ONE multi-row INSERT for
+        # the rolls and ONE for their history rows. The old loop used ~5
+        # database round trips per roll, so a large inward batch crawled
+        # and risked a request timeout.
+        import re
+        r0 = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
+        seq = int(r0["value"]) if r0 else 0
+        used = set()
+        for row in _q(c, "SELECT id FROM rolls WHERE id LIKE 'R-%%'").fetchall():
+            m = re.match(r"^R-(\d+)$", (row["id"] or "").upper())
+            if m:
+                used.add(int(m.group(1)))
+        ids = []
+        for _ in rows:
+            seq += 1
+            while seq in used:
+                seq += 1
+            used.add(seq)
+            ids.append("R-%04d" % seq)
+        _meta_set(c, "roll_seq", seq)
+        roll_sql = ("INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
+                    " manufacturer, created_date, status, styles, last_used_date, notes, location_id) VALUES "
+                    + ",".join("(%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)" for _ in rows))
+        params = []
+        for rid, r, w in zip(ids, rows, weights):
+            params += [rid, r.get("fabricType", ""), r.get("color", ""), r.get("dia", ""),
+                       r.get("gsm", ""), w, w, r.get("manufacturer", ""),
+                       r.get("createdDate", ""), r.get("notes", ""), loc]
+        _q(c, roll_sql, tuple(params))
+        hist_sql = ("INSERT INTO history(roll_id, date, type, style, weight_used, remaining, notes) VALUES "
+                    + ",".join("(%s,%s,'created','',0,%s,'Roll created (bulk inward)')" for _ in rows))
+        hparams = []
+        for rid, r, w in zip(ids, rows, weights):
+            hparams += [rid, r.get("createdDate", ""), w]
+        _q(c, hist_sql, tuple(hparams))
     return ids
 
 
@@ -542,8 +592,7 @@ def _next_wastage_id(c):
         if not _q(c, "SELECT 1 FROM wastage_bags WHERE id=%s", (bid,)).fetchone():
             break
         seq += 1
-    _q(c, "INSERT INTO meta(key, value) VALUES ('wastage_seq', %s) "
-           "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (str(seq),))
+    _meta_set(c, "wastage_seq", seq)
     return bid
 
 
@@ -661,20 +710,13 @@ def set_settings(d):
     d = d or {}
     with _conn() as c:
         if "lowKg" in d:
-            _q(c, "INSERT INTO meta(key, value) VALUES ('lowKg', %s)"
-                   " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
-               (str(float(d["lowKg"] or 5)),))
+            _meta_set(c, "lowKg", float(d["lowKg"] or 5))
         if "labelPreset" in d:
-            _q(c, "INSERT INTO meta(key, value) VALUES ('labelPreset', %s)"
-                   " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
-               (str(d["labelPreset"]),))
+            _meta_set(c, "labelPreset", d["labelPreset"])
         if "companyName" in d:
-            _q(c, "INSERT INTO meta(key, value) VALUES ('companyName', %s)"
-                   " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
-               (str(d["companyName"] or "").strip() or "Chakra Production",))
+            _meta_set(c, "companyName",
+                      str(d["companyName"] or "").strip() or "Chakra Production")
         for _k in ("labelCustomW", "labelCustomH", "labelCustomCols",
                    "labelCustomRows", "labelQrMm"):
             if _k in d:
-                _q(c, "INSERT INTO meta(key, value) VALUES (%s, %s)"
-                       " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
-                   (_k, str(d[_k])))
+                _meta_set(c, _k, d[_k])

@@ -962,6 +962,7 @@ function openBulkForm(){
     '<h2>📦 Bulk add rolls</h2>'
     + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Enter the shared details once — every roll gets its own ID and QR code.</div>'
     + '<label>Number of rolls</label><input id="b-count" type="number" inputmode="numeric" value="100" min="1" max="500">'
+    + '<div style="color:var(--muted);font-size:12px;margin-top:2px">Used only with "Same for all rolls" below. When you paste different weights, the number of weights IS the number of rolls.</div>'
     + '<div class="grid2"><div><label>Fabric type</label><input id="b-fabric" list="dl-bfab" placeholder="e.g. Cotton Jersey">'+dl(fabrics,"dl-bfab")+'</div>'
     + '<div><label>Colour</label><input id="b-color" placeholder="e.g. Black"></div></div>'
     + '<div class="grid2"><div><label>Dia</label><input id="b-dia" placeholder="e.g. 34"></div>'
@@ -974,32 +975,77 @@ function openBulkForm(){
     + '<label class="chk"><input type="radio" name="bwmode" checked onchange="bulkWeightMode()"><span>Same for all rolls</span></label>'
     + '<input id="b-weight" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 25.5">'
     + '<label class="chk"><input type="radio" name="bwmode" onchange="bulkWeightMode()"><span>Different per roll — paste weights, one per line</span></label>'
-    + '<textarea id="b-weights" rows="4" style="display:none" placeholder="25.5&#10;24.8&#10;26.1&#10;… (one weight per line, same count as rolls)"></textarea>'
+    + '<textarea id="b-weights" rows="4" style="display:none" oninput="bulkWeightsCount()" placeholder="25.5&#10;24.8&#10;26.1&#10;… one weight per line, or separated by commas"></textarea>'
+    + '<div id="b-wcount" style="display:none;color:var(--muted);font-size:13px;margin:4px 0"></div>'
     + '<label>Notes</label><textarea id="b-notes" rows="2" placeholder="Lot no, vehicle no…"></textarea>'
-    + '<div class="btnrow"><button class="btn" onclick="saveBulkForm()">💾 Create rolls</button>'
+    + '<div class="btnrow"><button class="btn" onclick="saveBulkForm()">🔍 Review rolls</button>'
     + '<button class="btn ghost" onclick="closeModal(\'m-bulk\')">Cancel</button></div>';
   $("m-bulk").classList.add("open");
+  if(bulkDraft){
+    const s = (id,v)=>{ const e=$(id); if(e) e.value=v; };
+    s("b-count",bulkDraft.count); s("b-fabric",bulkDraft.fabric); s("b-color",bulkDraft.color);
+    s("b-dia",bulkDraft.dia); s("b-gsm",bulkDraft.gsm); s("b-maker",bulkDraft.maker);
+    s("b-loc",bulkDraft.loc); s("b-date",bulkDraft.date); s("b-weight",bulkDraft.weight);
+    s("b-weights",bulkDraft.weights); s("b-notes",bulkDraft.notes);
+    const modes = document.querySelectorAll('input[name="bwmode"]');
+    if(modes[1]){ modes[1].checked = !!bulkDraft.diff; modes[0].checked = !bulkDraft.diff; }
+    bulkWeightMode();
+  }
 }
 function bulkWeightMode(){
   const diff = document.querySelector('input[name="bwmode"]:checked') !== document.querySelectorAll('input[name="bwmode"]')[0];
   $("b-weights").style.display = diff ? "block" : "none";
   $("b-weight").style.display = diff ? "none" : "block";
+  $("b-wcount").style.display = diff ? "block" : "none";
+  $("b-count").disabled = !!diff;
+  if(diff) bulkWeightsCount();
+}
+let bulkDraft = null;   /* form values, kept so Back-from-preview loses nothing */
+let bulkPending = null; /* rolls waiting for the preview confirmation */
+function parseBulkWeights(){
+  const toks = $("b-weights").value.split(/[\s,;]+/).map(s=>s.trim()).filter(s=>s!=="" && s.toLowerCase()!=="kg");
+  const weights = [], bad = [];
+  toks.forEach((t,i)=>{
+    const v = parseFloat(t);
+    if(isNaN(v)) bad.push("entry "+(i+1)+": "+t);
+    else weights.push(v);
+  });
+  return {weights:weights, bad:bad};
+}
+function bulkWeightsCount(){
+  const el = $("b-wcount"); if(!el) return;
+  const p = parseBulkWeights();
+  const tot = p.weights.reduce((a,w)=>a+w,0);
+  el.textContent = p.weights.length+" weights entered · total "+(Math.round(tot*100)/100)+" kg"
+    + (p.bad.length ? " · ⚠️ "+p.bad.length+" not a number" : "");
+}
+function captureBulkDraft(){
+  const g = id=>{ const e=$(id); return e?e.value:""; };
+  const modes = document.querySelectorAll('input[name="bwmode"]');
+  bulkDraft = { count:g("b-count"), fabric:g("b-fabric"), color:g("b-color"), dia:g("b-dia"),
+    gsm:g("b-gsm"), maker:g("b-maker"), loc:g("b-loc"), date:g("b-date"),
+    weight:g("b-weight"), weights:g("b-weights"), notes:g("b-notes"),
+    diff: modes[1] ? modes[1].checked : false };
 }
 async function saveBulkForm(){
-  const n = parseInt($("b-count").value, 10);
-  if(!(n>=1 && n<=500)){ alert("Enter number of rolls (1–500)."); return; }
   const modes = document.querySelectorAll('input[name="bwmode"]');
   const diff = modes[1].checked;
   let weights = [];
   if(diff){
-    weights = $("b-weights").value.split("\n").map(s=>s.trim()).filter(s=>s!=="").map(parseFloat);
-    if(weights.length !== n){ alert("You pasted "+weights.length+" weights but asked for "+n+" rolls — one weight per line needed."); return; }
-    if(weights.some(w=>!(w>0))){ alert("Every weight must be a number above 0."); return; }
+    const p = parseBulkWeights();
+    if(p.bad.length){ alert("These entries are not numbers — fix them and try again:\n"+p.bad.join(", ")); return; }
+    if(!p.weights.length){ alert("Paste the weights first — one per line, or separated by commas."); return; }
+    if(p.weights.length>500){ alert("Too many at once — at most 500 rolls (you pasted "+p.weights.length+")."); return; }
+    if(p.weights.some(w=>!(w>0))){ alert("Every weight must be above 0."); return; }
+    weights = p.weights; /* the pasted count IS the roll count — a mismatch is impossible */
   }else{
+    const n = parseInt($("b-count").value, 10);
+    if(!(n>=1 && n<=500)){ alert("Enter number of rolls (1–500)."); return; }
     const w = parseFloat($("b-weight").value);
     if(!(w>0)){ alert("Enter the weight per roll."); return; }
     weights = new Array(n).fill(w);
   }
+  captureBulkDraft();
   const shared = {
     fabricType:$("b-fabric").value.trim(), color:$("b-color").value.trim(),
     dia:$("b-dia").value.trim(), gsm:$("b-gsm").value.trim(),
@@ -1007,10 +1053,32 @@ async function saveBulkForm(){
     notes:$("b-notes").value.trim(),
     locationId:$("b-loc").value?parseInt($("b-loc").value,10):null
   };
-  const rolls = weights.map(w=>Object.assign({weight:w}, shared));
+  bulkPending = weights.map(w=>Object.assign({weight:w}, shared));
+  showBulkPreview(weights, shared);
+}
+function showBulkPreview(weights, shared){
+  const tot = weights.reduce((a,w)=>a+w,0);
+  const locName = shared.locationId ? ((store.locations.find(l=>l.id===shared.locationId)||{}).name||"") : "";
+  const chips = weights.map((w,i)=>'<span style="display:inline-block;background:#eef;border-radius:8px;padding:2px 8px;margin:2px;font-size:12px">#'+(i+1)+" · "+(Math.round(w*100)/100)+"</span>").join("");
+  $("m-bulk-sheet").innerHTML =
+    '<h2>✅ Check before saving</h2>'
+    + '<div style="font-size:14px;margin-bottom:6px"><b>'+weights.length+' rolls</b> · total <b>'+(Math.round(tot*100)/100)+' kg</b></div>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:8px">'
+    + esc(shared.fabricType||"—")+" · "+esc(shared.color||"—")
+    + (shared.dia?(" · Dia "+esc(shared.dia)):"") + (shared.gsm?(" · GSM "+esc(shared.gsm)):"")
+    + (locName?(" · 📍 "+esc(locName)):"") + " · " + fmtDate(shared.createdDate) + '</div>'
+    + '<div style="color:var(--muted);font-size:12px;margin-bottom:4px">Cross-check the total against your delivery challan before saving.</div>'
+    + '<div style="max-height:180px;overflow:auto;border:1px solid #ddd;border-radius:10px;padding:6px">'+chips+'</div>'
+    + '<div class="btnrow"><button class="btn" onclick="doBulkSave()">💾 Save '+weights.length+' rolls</button>'
+    + '<button class="btn ghost" onclick="openBulkForm()">← Back to edit</button></div>';
+}
+async function doBulkSave(){
+  if(!bulkPending) return;
+  const rolls = bulkPending; bulkPending = null;
   closeModal("m-bulk");
   try{
     const d = await api("POST","/api/rolls/bulk",{rolls:rolls});
+    bulkDraft = null;
     await refreshState();
     labelSel = {}; d.ids.forEach(id=>labelSel[id]=true);
     go("labels");

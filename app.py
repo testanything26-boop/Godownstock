@@ -130,6 +130,11 @@ def create_roll():
             return jsonify(db.create_roll(request.get_json(force=True)))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            # Surface the real cause instead of a bare 500 so a failure
+            # names itself in the user's alert (and in the Render log).
+            app.logger.exception("create_roll failed")
+            return jsonify({"error": "Server error while saving the roll: " + str(e)}), 500
 
 
 @app.route("/api/rolls/bulk", methods=["POST"])
@@ -141,6 +146,11 @@ def bulk_create():
             return jsonify({"ids": db.bulk_create(request.get_json(force=True))})
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            # Surface the real cause instead of a bare 500 so a failure
+            # names itself in the user's alert (and in the Render log).
+            app.logger.exception("bulk_create failed")
+            return jsonify({"error": "Server error while saving rolls: " + str(e)}), 500
 
 
 @app.route("/api/rolls/<rid>/history")
