@@ -377,7 +377,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <body>
 <header>
   <div class="logo">🏭</div>
-  <div><h1>Rollix<span class="vtag">v2.13</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
+  <div><h1>Rollix<span class="vtag">v2.14</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
     <span id="userchip" style="font-size:12px;color:var(--muted);"></span>
     <button id="btn-logout" class="btn ghost small" style="display:none" onclick="doLogout()">Logout</button>
@@ -1125,19 +1125,27 @@ async function doBulkSave(){
 
 /* ---------- labels ---------- */
 let labelSel = {};
+let labelMaker = ""; /* labels page: company (manufacturer) filter */
+let labelDate = "";  /* labels page: last picked inward date, kept across re-renders */
 let labelCopies = 1; /* stickers printed per roll */
 const LABEL_PRESETS = [["8","8 per sheet — large (2 × 4)"],["12","12 per sheet — medium (3 × 4)"],["24","24 per sheet — small (3 × 8)"],["custom","Custom size — set below"]];
 function renderLabels(){
   const preset = store.settings.labelPreset || "8";
-  const list = store.rolls.filter(r=>r.status!=="exhausted").slice().sort((a,b)=>a.id.localeCompare(b.id));
+  const makers = uniqueList("manufacturer");
+  let list = store.rolls.filter(r=>r.status!=="exhausted").slice().sort((a,b)=>a.id.localeCompare(b.id));
+  if(labelMaker) list = list.filter(r=>String(r.manufacturer||"")===labelMaker);
   const n = Object.keys(labelSel).filter(k=>labelSel[k]).length;
   let h = '<div class="card"><h3>🏷️ Print QR labels</h3>'
     + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Tick rolls → choose A4 sticker layout → Print. <b>Tip:</b> first print on plain paper and hold it over your sticker sheet to check the boxes line up.</div>'
     + '<div class="grid2"><div><label>A4 sticker layout</label><select onchange="setLabelPreset(this.value)">'
     + LABEL_PRESETS.map(p=>'<option value="'+p[0]+'"'+(preset===p[0]?" selected":"")+'>'+p[1]+'</option>').join("")
     + '</select></div>'
-    + '<div><label>Select all inwarded on</label><div class="searchrow"><input type="date" id="lb-date" value="'+todayISO()+'">'
-    + '<button class="btn small" onclick="labelSelectDate()">Select</button></div></div></div>'
+    + '<div><label>Company (manufacturer)</label><select onchange="labelMaker=this.value;renderLabels()"><option value="">All companies</option>'
+    + makers.map(m=>'<option'+(labelMaker===m?" selected":"")+'>'+esc(m)+'</option>').join("")
+    + '</select></div></div>'
+    + '<div><label>Select all inwarded on</label><div class="searchrow"><input type="date" id="lb-date" value="'+esc(labelDate||todayISO())+'" onchange="labelDate=this.value">'
+    + '<button class="btn small" onclick="labelSelectDate()">Select</button></div>'
+    + '<div style="color:var(--muted);font-size:12px;margin-top:4px">Selects the rolls inwarded on this date'+(labelMaker?(' from <b>'+esc(labelMaker)+'</b> only'):' (all companies)')+'. The list below also follows the company filter, so you can tick by hand.</div></div>'
     + '<div id="customSizeBox" style="'+(preset==="custom"?"":"display:none")+'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
     + '<div style="font-weight:700;margin-bottom:8px">Custom label size <span style="font-weight:400;font-size:11px;color:#888">v2.7</span></div>'
     + '<div class="grid2"><div><label>Width (mm)</label><input type="number" id="cs-w" min="10" step="1" value="'+(store.settings.labelCustomW||100)+'"></div>'
@@ -1150,11 +1158,12 @@ function renderLabels(){
     + '<button class="btn ghost small" onclick="labelAll(false)">Clear</button>'
     + '<button class="btn small" id="lb-print" onclick="printSelectedLabels()">🖨️ Print ('+(n*labelCopies)+')</button>'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:14px">Copies per sticker <input type="number" id="lb-copies" min="1" max="20" value="'+labelCopies+'" style="width:64px" onchange="setLabelCopies(this.value)"></label></div>'
+    + '<div style="color:var(--muted);font-size:13px;margin:8px 0 2px">Showing <b>'+list.length+'</b> roll'+(list.length===1?"":"s")+(labelMaker?(' · 🏭 '+esc(labelMaker)):"")+'</div>'
     + '<div id="labelList">'
     + (list.length? list.map(r=>
       '<label class="chk"><input type="checkbox" '+(labelSel[r.id]?"checked":"")+' onchange="labelToggle(\''+esc(r.id)+'\',this)">'
-      + '<span><b>'+esc(r.id)+'</b> · '+esc(r.fabricType||"")+' · '+esc(r.color||"")+' · Dia '+esc(r.dia||"")+'</span></label>'
-    ).join("") : '<div class="empty">No rolls to label.</div>')
+      + '<span><b>'+esc(r.id)+'</b> · '+esc(r.fabricType||"")+' · '+esc(r.color||"")+' · Dia '+esc(r.dia||"")+(r.manufacturer?(' · 🏭 '+esc(r.manufacturer)):"")+' · 📅 '+fmtDate(r.createdDate)+'</span></label>'
+    ).join("") : '<div class="empty">No rolls to label'+(labelMaker?(' for '+esc(labelMaker)):"")+'.</div>')
     + '</div></div>';
   $("v-labels").innerHTML = h;
 }
@@ -1173,13 +1182,17 @@ function labelToggle(id, el){
 }
 function labelSelectDate(){
   const d = $("lb-date").value; if(!d) return;
+  labelDate = d;
   let c=0;
-  store.rolls.forEach(r=>{ if(r.status!=="exhausted" && r.createdDate===d){ labelSel[r.id]=true; c++; } });
+  store.rolls.forEach(r=>{ if(r.status!=="exhausted" && r.createdDate===d && (!labelMaker || String(r.manufacturer||"")===labelMaker)){ labelSel[r.id]=true; c++; } });
   renderLabels();
-  if(!c) alert("No rolls found inwarded on "+d);
+  if(!c) alert("No rolls found inwarded on "+fmtDate(d)+(labelMaker?(" from "+labelMaker):""));
 }
 function labelAll(v){
-  store.rolls.forEach(r=>{ if(r.status!=="exhausted") labelSel[r.id]=v; });
+  /* "Select all" respects the company filter (all rolls currently shown);
+     "Clear" clears every selection, including rolls hidden by the filter,
+     so the Print count can never hide a leftover selection. */
+  store.rolls.forEach(r=>{ if(r.status!=="exhausted" && (!v || !labelMaker || String(r.manufacturer||"")===labelMaker)) labelSel[r.id]=v; });
   renderLabels();
 }
 function printSelectedLabels(){

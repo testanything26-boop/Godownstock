@@ -34,6 +34,16 @@ BEFORE using "Erase all data" (Backup tab, admin only):
   Download the Stock, Cutting and Wastage CSV reports first.
   Erasing cannot be undone.
 
+V2.14 — LABELS PAGE COMPANY FILTER (only change from v2.13 is
+index.html, but upload all four files together as always)
+  The Print Labels page now has a Company (manufacturer) filter next
+  to the layout picker. Pick a company and: the roll list below shows
+  only that company's rolls (each row now also shows the company and
+  the inward date), "Select all inwarded on <date>" selects only that
+  date's rolls FROM that company, and "Select all" selects the shown
+  rolls. "Clear" still clears every selection. The picked date is now
+  remembered when the page redraws.
+
 V2.13 — BULK ADD CLOSE BUTTON (only change from v2.12 is index.html,
 but upload all four files together as always)
   The Bulk add page no longer closes when you tap the dark background
