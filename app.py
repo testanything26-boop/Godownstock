@@ -118,7 +118,7 @@ def state():
 @login_required
 @with_db
 def next_id():
-    return jsonify({"id": db.peek_next_id()})
+    return jsonify({"id": db.peek_next_id(request.args.get("date"))})
 
 
 @app.route("/api/rolls", methods=["POST"])

@@ -367,7 +367,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <body>
 <header>
   <div class="logo">🏭</div>
-  <div><h1>Rollix<span class="vtag">v2.0</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
+  <div><h1>Rollix<span class="vtag">v2.12</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
     <span id="userchip" style="font-size:12px;color:var(--muted);"></span>
     <button id="btn-logout" class="btn ghost small" style="display:none" onclick="doLogout()">Logout</button>
@@ -660,9 +660,23 @@ function renderDash(){
 }
 
 /* ---------- rolls list ---------- */
-let rollFilter = { q:"", status:"", fabric:"", loc:"" };
+let rollFilter = { q:"", status:"", fabric:"", loc:"", date:"", maker:"" };
+function applyRollFilters(list){
+  const q = rollFilter.q.trim().toLowerCase();
+  if(q) list = list.filter(r=>[r.id,r.fabricType,r.color,r.manufacturer,r.location,(r.styles||[]).join(" ")].join(" ").toLowerCase().includes(q));
+  if(rollFilter.status) list = list.filter(r=>r.status===rollFilter.status);
+  if(rollFilter.fabric) list = list.filter(r=>r.fabricType===rollFilter.fabric);
+  if(rollFilter.loc) list = list.filter(r=>String(r.locationId||"")===rollFilter.loc);
+  if(rollFilter.date) list = list.filter(r=>String(r.createdDate||"")===rollFilter.date);
+  if(rollFilter.maker) list = list.filter(r=>String(r.manufacturer||"")===rollFilter.maker);
+  return list;
+}
+function sortRollsNewest(list){
+  return list.sort((a,b)=> String(b.createdDate||"").localeCompare(String(a.createdDate||""))
+    || String(b.id).localeCompare(String(a.id), undefined, {numeric:true}));
+}
 function renderRolls(){
-  const fabrics = uniqueList("fabricType");
+  const fabrics = uniqueList("fabricType"), makers = uniqueList("manufacturer");
   let list = store.rolls.slice().sort((a,b)=>String(b.createdDate).localeCompare(String(a.createdDate)));
   const q = rollFilter.q.trim().toLowerCase();
   if(q) list = list.filter(r=>[r.id,r.fabricType,r.color,r.manufacturer,r.location,(r.styles||[]).join(" ")].join(" ").toLowerCase().includes(q));
@@ -682,7 +696,12 @@ function renderRolls(){
     + '</select></div>'
     + '<div><label>Godown</label><select onchange="rollFilter.loc=this.value;renderRollsList()"><option value="">All</option>'
     + store.locations.map(l=>'<option value="'+l.id+'"'+(rollFilter.loc===String(l.id)?" selected":"")+'>📍 '+esc(l.name)+'</option>').join("")
+    + '</select></div>'
+    + '<div><label>Inward date</label><input type="date" value="'+esc(rollFilter.date)+'" onchange="rollFilter.date=this.value;renderRollsList()"></div>'
+    + '<div><label>Company (manufacturer)</label><select onchange="rollFilter.maker=this.value;renderRollsList()"><option value="">All</option>'
+    + makers.map(m=>'<option'+(rollFilter.maker===m?" selected":"")+'>'+esc(m)+'</option>').join("")
     + '</select></div></div>'
+    + '<div class="btnrow"><button class="btn ghost small" onclick="rollFilter={q:\'\',status:\'\',fabric:\'\',loc:\'\',date:\'\',maker:\'\'};renderRolls()">🧹 Clear filters</button></div>'
     + '<div class="btnrow"><button class="btn" onclick="openRollForm()">+ Add roll</button>'
     + '<button class="btn ghost" onclick="openBulkForm()">📦 Bulk add (many rolls)</button></div></div>'
     + '<div id="rollList"></div>';
@@ -691,18 +710,20 @@ function renderRolls(){
 }
 function renderRollsList(){
   const box = $("rollList"); if(!box) return;
-  let list = store.rolls.slice().sort((a,b)=>String(b.createdDate).localeCompare(String(a.createdDate)));
-  const q = rollFilter.q.trim().toLowerCase();
-  if(q) list = list.filter(r=>[r.id,r.fabricType,r.color,r.manufacturer,r.location,(r.styles||[]).join(" ")].join(" ").toLowerCase().includes(q));
-  if(rollFilter.status) list = list.filter(r=>r.status===rollFilter.status);
-  if(rollFilter.fabric) list = list.filter(r=>r.fabricType===rollFilter.fabric);
-  if(rollFilter.loc) list = list.filter(r=>String(r.locationId||"")===rollFilter.loc);
+  let list = applyRollFilters(sortRollsNewest(store.rolls.slice()));
   if(!list.length){ box.innerHTML = '<div class="empty"><div class="big">🧵</div>No rolls match.</div>'; return; }
-  box.innerHTML = list.map(r=>{
+  const totCur = list.reduce((a,r)=>a+(+r.currentWeight||0),0);
+  const totIn = list.reduce((a,r)=>a+(+r.weight||0),0);
+  const summary = '<div style="background:#eef4ff;border:1px solid #d7e3ff;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:14px">📦 <b>'+list.length+'</b> roll'+(list.length===1?"":"s")
+    + ' · <b>'+kg(totCur)+'</b> in stock now · '+kg(totIn)+' inwarded'
+    + (rollFilter.date?(' · 📅 '+fmtDate(rollFilter.date)):"")
+    + (rollFilter.maker?(' · 🏭 '+esc(rollFilter.maker)):"") + '</div>';
+  box.innerHTML = summary + list.map(r=>{
     const pct = r.weight>0 ? Math.max(0,Math.min(100, (r.currentWeight/r.weight)*100)) : 0;
     return '<div class="rollcard rc-'+r.status+'" onclick="openRoll(\''+esc(r.id)+'\')">'
       + '<div style="display:flex;justify-content:space-between;align-items:center"><span class="rid">'+esc(r.id)+'</span>'+(r.location?'<span style="font-size:12px;color:var(--muted)">📍 '+esc(r.location)+'</span>':"")+statusBadge(r)+'</div>'
       + '<div class="meta">'+esc(r.fabricType||"—")+' · '+esc(r.color||"—")+' · Dia '+esc(r.dia||"—")+' · '+esc(r.gsm||"—")+' GSM</div>'
+      + '<div class="meta">'+(r.manufacturer?('🏭 '+esc(r.manufacturer)+' · '):"")+'📅 Inward '+fmtDate(r.createdDate)+'</div>'
       + '<div class="meta">'+kg(r.currentWeight)+' left of '+kg(r.weight)+' · Last used: '+fmtDate(r.lastUsedDate)+'</div>'
       + '<div class="wbar"><div style="width:'+pct+'%"></div></div></div>';
   }).join("");
@@ -725,7 +746,7 @@ async function renderDetail(){
     + f("Current weight", '<span style="color:var(--green)">'+kg(r.currentWeight)+'</span>')
     + f("Manufacturer", esc(r.manufacturer||"—"))
     + f("Godown", r.location? "📍 "+esc(r.location) : "—")
-    + f("Created date", fmtDate(r.createdDate))
+    + f("Inward date", fmtDate(r.createdDate))
     + f("Last used date", fmtDate(r.lastUsedDate))
     + f("Used for styles", (r.styles&&r.styles.length)?esc(r.styles.join(", ")):"—")
     + '</div>'
@@ -794,7 +815,7 @@ function openRollForm(id){
     + '<div><label>GSM</label><input id="f-gsm" type="number" inputmode="numeric" value="'+esc(r?r.gsm:"")+'" placeholder="e.g. 180"></div></div>'
     + '<div class="grid2"><div><label>Weight (kg)</label><input id="f-weight" type="number" step="0.01" inputmode="decimal" value="'+esc(r?r.weight:"")+'" placeholder="e.g. 25.5"></div>'
     + '<div><label>Manufacturer</label><input id="f-maker" list="dl-mk" value="'+esc(r?r.manufacturer:"")+'" placeholder="Processor name">'+dl(makers,"dl-mk")+'</div></div>'
-    + '<label>Created / received date</label><input id="f-date" type="date" value="'+esc(r?r.createdDate:todayISO())+'">'
+    + '<label>Inward date</label><input id="f-date" type="date" value="'+esc(r?r.createdDate:todayISO())+'" onchange="updateNextIdHint()">'
     + '<label>Godown location</label><select id="f-loc">'
     + '<option value="">— No godown —</option>'
     + store.locations.map(l=>'<option value="'+l.id+'"'+(r&&r.locationId===l.id?" selected":"")+'>📍 '+esc(l.name)+'</option>').join("")
@@ -804,12 +825,16 @@ function openRollForm(id){
     + '<div class="btnrow"><button class="btn" onclick="saveRollForm('+(isNew?"null":"'"+esc(r.id)+"'")+')">💾 Save roll</button>'
     + '<button class="btn ghost" onclick="closeModal(\'m-roll\')">Cancel</button></div>';
   $("m-roll").classList.add("open");
-  if(isNew){
-    api("GET","/api/rolls/next-id").then(function(d){
-      const el=$("nextid-hint");
-      if(el&&d&&d.id) el.innerHTML='Leave blank &rarr; ID will be <b>'+esc(d.id)+'</b>. Or type your own.';
-    }).catch(function(){ const el=$("nextid-hint"); if(el) el.innerHTML='Leave blank for an automatic ID.'; });
-  }
+  if(isNew) updateNextIdHint();
+}
+function updateNextIdHint(){
+  const el = $("nextid-hint"); if(!el) return;
+  const dEl = $("f-date");
+  const dt = dEl ? (dEl.value || todayISO()) : todayISO();
+  api("GET","/api/rolls/next-id?date="+encodeURIComponent(dt)).then(function(d){
+    const el2 = $("nextid-hint");
+    if(el2 && d && d.id) el2.innerHTML = 'Leave blank &rarr; ID will be <b>'+esc(d.id)+'</b> (date in the ID, number restarts each day). Or type your own.';
+  }).catch(function(){ const el2=$("nextid-hint"); if(el2) el2.innerHTML='Leave blank for an automatic ID (date in the ID, number restarts each day).'; });
 }
 async function saveRollForm(id){
   const isNew = !id;
@@ -880,7 +905,7 @@ function renderScan(){
     + '<button class="btn ghost" id="scanstop" onclick="stopScanner()" style="display:none">⏹ Stop</button></div>'
     + '<div id="scanmsg" style="margin-top:8px;font-size:13px;color:var(--muted)"></div></div>'
     + '<div class="card"><h3>⌨️ Or enter roll ID manually</h3>'
-    + '<div class="searchrow"><input id="scanmanual" placeholder="e.g. R-0001 or W-0001" autocapitalize="characters">'
+    + '<div class="searchrow"><input id="scanmanual" placeholder="e.g. R291026-1 or W-0001" autocapitalize="characters">'
     + '<button class="btn" onclick="manualScan()">Go</button></div>'
     + '<div style="color:var(--muted);font-size:12px">Camera needs the page opened over <b>https://</b> or <b>localhost</b> — phone browsers block the camera on plain files. Manual entry always works.</div></div>';
 }
@@ -1386,7 +1411,7 @@ function renderBackup(){
     + '<div><label>Wastage to</label><input type="date" id="repw-to" value="'+todayISO()+'"></div></div>'
     + '<div class="btnrow"><button class="btn small" onclick="downloadWastage()">♻️ Wastage report (CSV)</button></div></div>'
     + '<div class="card" style="border-color:var(--red)"><h3>🗑️ Erase all data</h3>'
-    + '<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Deletes <b>every</b> roll, cutting history entry, wastage bag and godown, and resets numbering so the next roll is R-0001 and the next bag is W-0001. Logins, company name and settings are kept. <b>This cannot be undone.</b> Download the Stock, Cutting and Wastage CSV reports above first.</div>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Deletes <b>every</b> roll, cutting history entry, wastage bag and godown. Roll numbering restarts — the first roll inwarded on a date gets number 1 for that date — and the next bag is W-0001. Logins, company name and settings are kept. <b>This cannot be undone.</b> Download the Stock, Cutting and Wastage CSV reports above first.</div>'
     + (isAdmin?'<div id="erase-preview" style="font-size:13px;margin-bottom:8px"></div>'
     + '<div class="btnrow"><button class="btn ghost small" onclick="showErasePreview()">Show what will be erased</button></div>'
     + '<div class="btnrow"><input id="erase-confirm" placeholder="Type ERASE to confirm" style="flex:1"><button class="btn small" style="background:var(--red);color:#fff" onclick="eraseAllData()">Erase everything</button></div>'
@@ -1424,7 +1449,7 @@ async function deleteLocation(id){
 async function showErasePreview(){
   try{
     const d = await api("GET","/api/admin/erase-preview");
-    $("erase-preview").innerHTML = "This will erase: <b>"+d.rolls+" rolls</b>, <b>"+d.history+" cutting history entries</b>, <b>"+d.bags+" wastage bags</b>, <b>"+d.locations+" godowns</b>. Numbering resets to R-0001 / W-0001.";
+    $("erase-preview").innerHTML = "This will erase: <b>"+d.rolls+" rolls</b>, <b>"+d.history+" cutting history entries</b>, <b>"+d.bags+" wastage bags</b>, <b>"+d.locations+" godowns</b>. Roll numbering restarts per inward date; bags reset to W-0001.";
   }catch(e){ $("erase-preview").textContent = "Could not load counts: "+e.message; }
 }
 async function eraseAllData(){
@@ -1433,7 +1458,7 @@ async function eraseAllData(){
   if(!confirm("Erase EVERYTHING? All rolls, cutting history, wastage bags and godowns will be deleted. This cannot be undone.")) return;
   try{
     const d = await api("POST","/api/admin/erase-all",{confirm:"ERASE"});
-    alert("Erased: "+d.erased.rolls+" rolls, "+d.erased.history+" history entries, "+d.erased.bags+" bags, "+d.erased.locations+" godowns. Fresh start — next roll R-0001, next bag W-0001.");
+    alert("Erased: "+d.erased.rolls+" rolls, "+d.erased.history+" history entries, "+d.erased.bags+" bags, "+d.erased.locations+" godowns. Fresh start — roll numbering restarts per inward date, next bag W-0001.");
     $("erase-confirm").value = "";
     await refreshState(); renderBackup();
   }catch(e){ $("erase-result").textContent = "Erase failed: "+e.message; }
@@ -1512,7 +1537,7 @@ async function boot(){
   try{ await refreshState(); }
   catch(e){ if(e.message==="login"){ updateUserUI(); showLogin(); return; } alert("Could not reach server: "+e.message); return; }
   hideLogin();
-  const m = location.hash.match(/#(R-[A-Za-z0-9-]+)/i);
+  const m = location.hash.match(/#(R[A-Za-z0-9-]+)/i);
   if(m && findRoll(m[1].toUpperCase())){ currentRollId = m[1].toUpperCase(); go("detail"); }
   else go("dash");
   try{ history.replaceState(null,"",location.pathname); }catch(e){}

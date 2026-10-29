@@ -206,43 +206,63 @@ def delete_user(username):
 
 
 # ---------------------------------------------------------------- rolls
-def peek_next_id():
-    """The ID the next auto-created roll will get (informational only;
-    the real assignment happens at save time)."""
+def _date_prefix(created_date):
+    """Roll ID prefix from the inward date (v2.12): 'R' + DDMMYY, e.g.
+    inward date 2026-10-29 -> 'R291026'. A missing/unreadable date falls
+    back to today, so an ID can always be formed."""
+    import datetime
+    s = (created_date or "").strip()
+    d = None
+    if s:
+        try:
+            d = datetime.date.fromisoformat(s[:10])
+        except ValueError:
+            d = None
+    if d is None:
+        d = datetime.date.today()
+    return "R%02d%02d%02d" % (d.day, d.month, d.year % 100)
+
+
+def _max_seq_for(c, prefix):
+    """Highest sequence number already used for one date prefix
+    (ids look like R291026-7). Scans the real rows, so numbering always
+    matches what exists — no separate counter to drift or crash."""
     import re
+    pat = re.compile(r"^" + re.escape(prefix) + r"-(\d+)$")
+    m = 0
+    for row in _q(c, "SELECT id FROM rolls WHERE id LIKE %s",
+                  (prefix + "-%",)).fetchall():
+        mm = pat.match((row["id"] or "").upper())
+        if mm:
+            m = max(m, int(mm.group(1)))
+    return m
+
+
+def peek_next_id(created_date=None):
+    """The ID the next auto-created roll inwarded on `created_date`
+    (default: today) will get (informational only; the real assignment
+    happens at save time)."""
+    prefix = _date_prefix(created_date)
     with _conn() as c:
-        r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
-        seq = int(r["value"]) if r else 0
-        m = 0
-        for row in _q(c, "SELECT id FROM rolls WHERE id LIKE 'R-%%'").fetchall():
-            mm = re.match(r"^R-(\d+)$", (row["id"] or "").upper())
-            if mm:
-                m = max(m, int(mm.group(1)))
-        return "R-%04d" % (max(seq, m) + 1)
+        return "%s-%d" % (prefix, _max_seq_for(c, prefix) + 1)
 
 
-def _next_id(c):
-    r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
-    seq = int(r["value"]) if r else 0
+def _next_id(c, created_date=None):
+    prefix = _date_prefix(created_date)
+    seq = _max_seq_for(c, prefix)
     while True:
         seq += 1
-        rid = "R-%04d" % seq
+        rid = "%s-%d" % (prefix, seq)
         if not _q(c, "SELECT 1 FROM rolls WHERE id=%s", (rid,)).fetchone():
             break
-    _meta_set(c, "roll_seq", seq)
-    # if the caller supplied a custom id like R-0100, keep the counter ahead
     return rid, seq
 
 
 def _bump_seq_for(c, rid):
-    import re
-    m = re.match(r"^R-(\d+)$", (rid or "").upper())
-    if not m:
-        return
-    n = int(m.group(1))
-    r = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
-    if not r or int(r["value"]) < n:
-        _meta_set(c, "roll_seq", n)
+    # Kept for API compatibility with create_roll's custom-ID path.
+    # Date-based numbering is derived from the rows themselves (see
+    # _max_seq_for), so a caller-supplied ID needs no counter upkeep.
+    return
 
 
 def _get_roll(c, rid):
@@ -270,7 +290,7 @@ def create_roll(data):
                 raise ValueError("Roll ID %s already exists" % rid)
             _bump_seq_for(c, rid)
         else:
-            rid, _ = _next_id(c)
+            rid, _ = _next_id(c, data.get("createdDate"))
         _q(c, "INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
               " manufacturer, created_date, status, styles, last_used_date, notes, location_id)"
               " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)",
@@ -304,28 +324,20 @@ def bulk_create(data):
         if loc_src is None and rows:
             loc_src = rows[0].get("locationId")
         loc = _location_id(c, loc_src)
-        # Fast batch path (v2.11): allocate ALL ids in one pass — read the
-        # counter and the existing R-numbers once, hand out numbers in
-        # memory, save the counter once — then ONE multi-row INSERT for
-        # the rolls and ONE for their history rows. The old loop used ~5
-        # database round trips per roll, so a large inward batch crawled
-        # and risked a request timeout.
-        import re
-        r0 = _q(c, "SELECT value FROM meta WHERE key='roll_seq'").fetchone()
-        seq = int(r0["value"]) if r0 else 0
-        used = set()
-        for row in _q(c, "SELECT id FROM rolls WHERE id LIKE 'R-%%'").fetchall():
-            m = re.match(r"^R-(\d+)$", (row["id"] or "").upper())
-            if m:
-                used.add(int(m.group(1)))
+        # Fast batch path (v2.11, date IDs v2.12): allocate ALL ids in one
+        # pass — for each inward date in the batch, read that date's
+        # highest used sequence once, then hand out numbers in memory —
+        # then ONE multi-row INSERT for the rolls and ONE for their
+        # history rows. The old loop used ~5 database round trips per
+        # roll, so a large inward batch crawled and risked a timeout.
+        seq_by_prefix = {}
         ids = []
-        for _ in rows:
-            seq += 1
-            while seq in used:
-                seq += 1
-            used.add(seq)
-            ids.append("R-%04d" % seq)
-        _meta_set(c, "roll_seq", seq)
+        for r in rows:
+            prefix = _date_prefix(r.get("createdDate"))
+            if prefix not in seq_by_prefix:
+                seq_by_prefix[prefix] = _max_seq_for(c, prefix)
+            seq_by_prefix[prefix] += 1
+            ids.append("%s-%d" % (prefix, seq_by_prefix[prefix]))
         roll_sql = ("INSERT INTO rolls(id, fabric_type, color, dia, gsm, weight, current_weight,"
                     " manufacturer, created_date, status, styles, last_used_date, notes, location_id) VALUES "
                     + ",".join("(%s,%s,%s,%s,%s,%s,%s,%s,%s,'in-stock','','',%s,%s)" for _ in rows))
@@ -421,8 +433,11 @@ def erase_preview():
 def erase_all_data():
     # Wipe every transactional record for a fresh start. Keeps users (so the
     # admin can still log in) and all other meta settings (company name,
-    # label preset, low-stock threshold). Deleting the roll_seq / wastage_seq
-    # keys resets numbering: next roll is R-0001, next bag is W-0001.
+    # label preset, low-stock threshold). Roll numbering is date-based
+    # (v2.12) and derived from the rolls themselves, so with every roll
+    # deleted it restarts on its own: the first roll inwarded on a date
+    # gets R<DDMMYY>-1 for that date. Deleting the wastage_seq key resets
+    # bag numbering: next bag is W-0001.
     with _conn() as c:
         counts = {
             "rolls": _q(c, "SELECT COUNT(*) AS n FROM rolls").fetchone()["n"],

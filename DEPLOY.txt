@@ -33,3 +33,21 @@ STAFF PHONE SHOWS THE BANNER BUT ADMIN DOES NOT?
 BEFORE using "Erase all data" (Backup tab, admin only):
   Download the Stock, Cutting and Wastage CSV reports first.
   Erasing cannot be undone.
+
+V2.12 — DATE-BASED ROLL IDS, AND THE PLANNED FRESH START
+  Roll IDs now carry the inward date: R<DDMMYY>-<number for that date>.
+  Example: the first roll inwarded on 29 Oct 2026 is R291026-1, the
+  second that day is R291026-2, and the first roll on 30 Oct 2026 is
+  R301026-1 (the number restarts at 1 every date).
+  The Rolls page also has Inward date and Company (manufacturer)
+  filters, with a rolls count and kg summary for what is shown.
+  Fresh start with this version, in this order:
+    1. Deploy all four files (steps above); check the banner is gone.
+    2. Backup tab: download the CSV reports if you want to keep records.
+    3. Backup tab: Erase all data (type ERASE). This removes the old
+       R-0001 style rolls for good; numbering then restarts on its own.
+       Godowns are erased too — re-add them in Settings -> Company &
+       godowns before adding rolls.
+    4. Add rolls as usual; the new date IDs are automatic in Add roll
+       and Bulk add (the Add form shows the exact next ID for the
+       inward date you pick).
