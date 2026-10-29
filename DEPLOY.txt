@@ -34,6 +34,14 @@ BEFORE using "Erase all data" (Backup tab, admin only):
   Download the Stock, Cutting and Wastage CSV reports first.
   Erasing cannot be undone.
 
+V2.13 — BULK ADD CLOSE BUTTON (only change from v2.12 is index.html,
+but upload all four files together as always)
+  The Bulk add page no longer closes when you tap the dark background
+  behind it — a stray tap used to close the page and lose what was
+  typed. It now closes ONLY from the round ✕ button at the top-right
+  corner (or the Cancel button). Same for the "Check before saving"
+  screen. All other pages keep their old behaviour.
+
 V2.12 — DATE-BASED ROLL IDS, AND THE PLANNED FRESH START
   Roll IDs now carry the inward date: R<DDMMYY>-<number for that date>.
   Example: the first roll inwarded on 29 Oct 2026 is R291026-1, the
