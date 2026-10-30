@@ -197,6 +197,20 @@ def log_cut(rid):
             return jsonify({"error": str(e)}), 400
 
 
+@app.route("/api/rolls/<rid>/return", methods=["POST"])
+@login_required
+@with_db
+def log_return(rid):
+    with write_lock:
+        try:
+            return jsonify(db.log_return(rid, request.get_json(force=True)))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            app.logger.exception("log_return failed")
+            return jsonify({"error": "Server error while saving the return: " + str(e)}), 500
+
+
 @app.route("/api/rolls/<rid>", methods=["DELETE"])
 @admin_required
 @with_db

@@ -27,6 +27,9 @@ create table if not exists history (
   remaining numeric default 0,
   notes text default ''
 );
+-- v2.16: cutting-weight returns link to their cutting entry via ref_id
+-- (the app also auto-applies this on login via db._ensure_history_schema).
+alter table history add column if not exists ref_id integer;
 create index if not exists idx_history_roll on history(roll_id);
 create index if not exists idx_history_date on history(date);
 

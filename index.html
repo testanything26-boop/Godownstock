@@ -377,7 +377,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <body>
 <header>
   <div class="logo">🏭</div>
-  <div><h1>Rollix<span class="vtag">v2.15</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
+  <div><h1>Rollix<span class="vtag">v2.16</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
     <span id="userchip" style="font-size:12px;color:var(--muted);"></span>
     <button id="btn-logout" class="btn ghost small" style="display:none" onclick="doLogout()">Logout</button>
@@ -405,6 +405,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 
 <div class="modal" id="m-roll"><div class="sheet" id="m-roll-sheet"></div></div>
 <div class="modal" id="m-cut"><div class="sheet" id="m-cut-sheet"></div></div>
+<div class="modal" id="m-return"><div class="sheet" id="m-return-sheet"></div></div>
 <div class="modal" id="m-bulk"><div class="sheet" id="m-bulk-sheet"></div></div>
 <div class="modal" id="m-bulkedit"><div class="sheet" id="m-bulkedit-sheet"></div></div>
 <div class="modal" id="m-bag"><div class="sheet" id="m-bag-sheet"></div></div>
@@ -659,9 +660,10 @@ function renderDash(){
     ? '<div class="empty"><div class="big">📦</div>No activity yet. Add your first roll to begin.</div>'
     : '<div style="color:var(--muted);font-size:13px">Waiting for the updated server (see warning above).</div>';
   else h += recent.map(a=>{
-    const dot = a.h.type==="created" ? "var(--acc)" : (a.h.type==="cutting" ? "var(--amber)" : "var(--violet)");
+    const dot = a.h.type==="created" ? "var(--acc)" : (a.h.type==="cutting" ? "var(--amber)" : (a.h.type==="return" ? "var(--green)" : "var(--violet)"));
     const what = a.h.type==="created" ? "Roll created · "+kg(a.h.remaining)
       : a.h.type==="cutting" ? "Cut "+kg(a.h.weightUsed)+(a.h.style?(" for <b>"+esc(a.h.style)+"</b>"):"")+" · left "+kg(a.h.remaining)
+      : a.h.type==="return" ? "Returned "+kg(a.h.weightUsed)+" · left "+kg(a.h.remaining)
       : "Adjustment · "+esc(a.h.notes||"");
     return '<div class="actrow"><span class="hist-dot" style="background:'+dot+'"></span><b>'+esc(a.r.id)+'</b> — '+what
       + '<div class="d">'+fmtDate(a.h.date)+'</div></div>';
@@ -747,6 +749,7 @@ function renderRollsList(){
 }
 
 /* ---------- roll detail ---------- */
+let detailHist = [], detailHistRoll = "";
 async function renderDetail(){
   const r = findRoll(currentRollId);
   const box = $("v-detail");
@@ -786,16 +789,26 @@ async function renderDetail(){
      phone show up here immediately */
   try{
     const hist = await api("GET","/api/rolls/"+encodeURIComponent(r.id)+"/history");
+    detailHist = hist; detailHistRoll = r.id;
     const el = $("hist-body");
     if(!el) return;
     if(!hist.length){ el.innerHTML = '<div style="color:var(--muted)">No history yet.</div>'; return; }
+    const returnedByRef = {};
+    hist.forEach(x=>{ if(x.type==="return" && x.refId!=null) returnedByRef[x.refId] = (returnedByRef[x.refId]||0) + (+x.weightUsed||0); });
     el.innerHTML = '<table><tr><th>Date</th><th>Action</th><th>Style</th><th>Used</th><th>Left</th></tr>'
       + hist.map(x=>{
-        const dot = x.type==="created"?"var(--acc)":(x.type==="cutting"?"var(--amber)":"var(--violet)");
-        const act = x.type==="created"?"Created":(x.type==="cutting"?"Cutting":"Adjustment");
+        const dot = x.type==="created"?"var(--acc)":(x.type==="cutting"?"var(--amber)":(x.type==="return"?"var(--green)":"var(--violet)"));
+        const act = x.type==="created"?"Created":(x.type==="cutting"?"Cutting":(x.type==="return"?"Returned":"Adjustment"));
+        let extra = "";
+        if(x.type==="cutting"){
+          const done = returnedByRef[x.hid]||0, can = Math.round(((+x.weightUsed||0)-done)*100)/100;
+          if(can > 0.005) extra = '<div style="margin-top:4px"><button class="btn ghost small" onclick="openReturnForm('+x.hid+')">↩ Return weight</button>'
+            + (done>0 ? ' <span style="color:var(--muted);font-size:11px">'+kg(done)+' returned so far</span>' : "") + '</div>';
+          else if((+x.weightUsed||0) > 0) extra = '<div style="color:var(--muted);font-size:11px;margin-top:4px">✔ fully returned</div>';
+        }
         return '<tr><td>'+fmtDate(x.date)+'</td><td><span class="hist-dot" style="background:'+dot+'"></span>'+act
-          + (x.notes?'<div style="color:var(--muted);font-size:11px">'+esc(x.notes)+'</div>':"")
-          + '</td><td>'+esc(x.style||"—")+'</td><td>'+(x.type==="cutting"?kg(x.weightUsed):"—")+'</td><td>'+kg(x.remaining)+'</td></tr>';
+          + (x.notes?'<div style="color:var(--muted);font-size:11px">'+esc(x.notes)+'</div>':"") + extra
+          + '</td><td>'+esc(x.style||"—")+'</td><td>'+(x.type==="cutting"?kg(x.weightUsed):(x.type==="return"?("+"+kg(x.weightUsed)):"—"))+'</td><td>'+kg(x.remaining)+'</td></tr>';
       }).join("") + '</table>';
   }catch(e){
     const el = $("hist-body");
@@ -904,6 +917,40 @@ async function saveCutForm(id){
   closeModal("m-cut");
   try{
     await api("POST","/api/rolls/"+encodeURIComponent(id)+"/cut",data);
+    await refreshState(); currentRollId = String(id).toUpperCase(); renderDetail();
+  }catch(e){ if(e.message!=="login") alert(e.message); }
+}
+/* ---------- return cutting weight ---------- */
+function openReturnForm(hid){
+  const r = findRoll(detailHistRoll); if(!r) return;
+  const e = detailHist.find(x=>x.hid===hid && x.type==="cutting");
+  if(!e){ alert("Cutting entry not found — reopen the roll and try again."); return; }
+  let done = 0;
+  detailHist.forEach(x=>{ if(x.type==="return" && x.refId===hid) done += (+x.weightUsed||0); });
+  const can = Math.round(((+e.weightUsed||0)-done)*100)/100;
+  if(can <= 0.005){ alert("This cutting is already fully returned."); return; }
+  $("m-return-sheet").innerHTML =
+    '<h2>↩ Return weight — '+esc(r.id)+'</h2>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Against the cutting of <b>'+kg(e.weightUsed)+'</b> on '+fmtDate(e.date)
+    + (e.style?(' for '+esc(e.style)):"")+' · '+kg(r.currentWeight)+' currently on the roll'
+    + (done>0 ? '<br>'+kg(done)+' already returned against this cutting' : "")
+    + '<br>You can return up to <b style="color:var(--green)">'+kg(can)+'</b> more.</div>'
+    + '<label>Date returned</label><input id="rt-date" type="date" value="'+todayISO()+'">'
+    + '<label>Weight returned (kg)</label><input id="rt-w" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 3">'
+    + '<label>Notes</label><textarea id="rt-notes" rows="2" placeholder="Why returned, who returned it…"></textarea>'
+    + '<div class="btnrow"><button class="btn" onclick="saveReturnForm('+hid+')">💾 Save return</button>'
+    + '<button class="btn ghost" onclick="closeModal(\'m-return\')">Cancel</button></div>';
+  $("m-return").classList.add("open");
+}
+async function saveReturnForm(hid){
+  const id = detailHistRoll;
+  const w = parseFloat($("rt-w").value);
+  if(!(w>0)){ alert("Enter the returned weight in kg."); return; }
+  const data = { historyId: hid, date: $("rt-date").value||todayISO(),
+                 weightReturned: w, notes: $("rt-notes").value.trim() };
+  closeModal("m-return");
+  try{
+    await api("POST","/api/rolls/"+encodeURIComponent(id)+"/return",data);
     await refreshState(); currentRollId = String(id).toUpperCase(); renderDetail();
   }catch(e){ if(e.message!=="login") alert(e.message); }
 }

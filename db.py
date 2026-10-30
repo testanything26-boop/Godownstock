@@ -95,6 +95,13 @@ def _ensure_location_schema(c):
           " location_id integer REFERENCES locations(id)")
 
 
+def _ensure_history_schema(c):
+    """Idempotent migration for cutting-weight returns (v2.16): history
+    gains ref_id, linking a 'return' entry to the cutting entry it
+    returns weight against."""
+    _q(c, "ALTER TABLE history ADD COLUMN IF NOT EXISTS ref_id integer")
+
+
 def _ensure_wastage_schema(c):
     """Idempotent migration for wastage bags (v2.2)."""
     _q(c, "CREATE TABLE IF NOT EXISTS wastage_bags ("
@@ -153,6 +160,7 @@ def _hist(d):
         "weightUsed": float(d.get("weight_used") or 0),
         "remaining": float(d.get("remaining") or 0),
         "notes": d.get("notes") or "",
+        "refId": d.get("ref_id"),
     }
 
 
@@ -163,6 +171,7 @@ def ensure_seed():
     with _conn() as c:
         _ensure_location_schema(c)
         _ensure_wastage_schema(c)
+        _ensure_history_schema(c)
         n = _q(c, "SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         if n == 0:
             if not ap:
@@ -272,10 +281,10 @@ def _get_roll(c, rid):
     return _roll(r) if r else None
 
 
-def _add_history(c, rid, date, typ, style, used, remaining, notes):
-    _q(c, "INSERT INTO history(roll_id, date, type, style, weight_used, remaining, notes)"
-          " VALUES (%s,%s,%s,%s,%s,%s,%s)",
-       (rid, date or "", typ, style or "", used, remaining, notes or ""))
+def _add_history(c, rid, date, typ, style, used, remaining, notes, ref_id=None):
+    _q(c, "INSERT INTO history(roll_id, date, type, style, weight_used, remaining, notes, ref_id)"
+          " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+       (rid, date or "", typ, style or "", used, remaining, notes or "", ref_id))
 
 
 def create_roll(data):
@@ -477,6 +486,48 @@ def log_cut(rid, data):
               " last_used_date=%s WHERE id=%s",
            (remaining, status, ",".join(styles), last_used, rid))
         _add_history(c, rid, date, "cutting", style, used, remaining, data.get("notes", ""))
+        return _get_roll(c, rid)
+
+
+def log_return(rid, data):
+    """Add returned cutting weight back onto a roll (v2.16).
+
+    The return is recorded against ONE cutting entry (data.historyId)
+    as its own 'return' history entry — the cutting entry itself is
+    never changed. Per his rule, the total returned against a cutting
+    entry can never exceed that entry's used kg. An exhausted roll
+    comes back to 'in-use' when weight returns.
+    """
+    data = data or {}
+    ret = round(float(data.get("weightReturned") or 0), 2)
+    if ret <= 0:
+        raise ValueError("Enter the returned weight")
+    try:
+        hid = int(data.get("historyId"))
+    except (TypeError, ValueError):
+        raise ValueError("Pick the cutting entry this return belongs to")
+    with _conn() as c:
+        _ensure_history_schema(c)
+        r = _q(c, "SELECT * FROM rolls WHERE id=%s", (rid,)).fetchone()
+        if not r:
+            raise ValueError("Roll not found")
+        e = _q(c, "SELECT * FROM history WHERE hid=%s AND roll_id=%s", (hid, rid)).fetchone()
+        if not e or e["type"] != "cutting":
+            raise ValueError("Cutting entry not found")
+        already = _q(c, "SELECT COALESCE(SUM(weight_used),0) AS s FROM history"
+                        " WHERE ref_id=%s AND type='return'", (hid,)).fetchone()["s"]
+        max_ret = round(float(e["weight_used"] or 0) - float(already or 0), 2)
+        if ret > max_ret + 0.001:
+            raise ValueError("Only %.2f kg can still be returned against this cutting" % max_ret)
+        import datetime
+        date = data.get("date") or datetime.date.today().isoformat()
+        remaining = round(min(float(r["weight"] or 0), float(r["current_weight"] or 0) + ret), 2)
+        status = "in-use" if remaining > 0.01 else r["status"]
+        _q(c, "UPDATE rolls SET current_weight=%s, status=%s WHERE id=%s",
+           (remaining, status, rid))
+        notes = (data.get("notes") or "").strip() or (
+            "Returned against the %s cutting" % (e["date"] or "earlier"))
+        _add_history(c, rid, date, "return", e["style"] or "", ret, remaining, notes, ref_id=hid)
         return _get_roll(c, rid)
 
 

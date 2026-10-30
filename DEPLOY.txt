@@ -34,6 +34,22 @@ BEFORE using "Erase all data" (Backup tab, admin only):
   Download the Stock, Cutting and Wastage CSV reports first.
   Erasing cannot be undone.
 
+V2.16 — RETURN CUTTING WEIGHT (changes in index.html, app.py, db.py
+and schema.sql — upload all four files together as always)
+  When the cutting section gives fabric back, open the roll and use
+  the new "Return weight" button on that cutting entry in the roll's
+  history. Enter the returned kg: the roll's balance goes back up and
+  history gains a separate "Returned" line — the original cutting
+  entry is never changed, so the full record is kept.
+  Rules: returns are recorded against one cutting entry at a time,
+  and the total returned against a cutting can never exceed what that
+  cutting used (a 10 kg cut can take back at most 10 kg in total).
+  If an exhausted roll (0 kg) gets weight back, it automatically
+  returns to "In use". Anyone who can log cutting can log a return.
+  The server adds the small history column it needs by itself on
+  login — no SQL step for existing users (schema.sql carries it for
+  fresh installs).
+
 V2.15 — BULK EDIT (changes in index.html, app.py and db.py — upload
 all four files together as always)
   New "Bulk edit" button on the Rolls page: change many rolls at once.
