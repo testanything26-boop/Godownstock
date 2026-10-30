@@ -153,6 +153,21 @@ def bulk_create():
             return jsonify({"error": "Server error while saving rolls: " + str(e)}), 500
 
 
+@app.route("/api/rolls/bulk-edit", methods=["POST"])
+@login_required
+@with_db
+def bulk_edit():
+    with write_lock:
+        try:
+            data = request.get_json(force=True)
+            return jsonify(db.bulk_update(data.get("ids"), data.get("fields")))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            app.logger.exception("bulk_edit failed")
+            return jsonify({"error": "Server error while updating rolls: " + str(e)}), 500
+
+
 @app.route("/api/rolls/<rid>/history")
 @login_required
 @with_db

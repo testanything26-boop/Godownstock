@@ -384,6 +384,72 @@ def update_roll(rid, data):
         return _get_roll(c, rid)
 
 
+_BULK_EDIT_COLS = {
+    "manufacturer": "manufacturer",
+    "color": "color",
+    "fabricType": "fabric_type",
+    "dia": "dia",
+    "gsm": "gsm",
+}
+_BULK_EDIT_LABELS = {
+    "manufacturer": "Company", "color": "Colour", "fabricType": "Fabric",
+    "dia": "Dia", "gsm": "GSM", "locationId": "Godown",
+}
+
+
+def bulk_update(ids, fields):
+    """Apply the same field changes to many rolls at once (v2.15 bulk edit).
+
+    Only the whitelisted fields are touched; each roll keeps every other
+    value. One history entry per roll records old -> new for the audit
+    trail. All-or-nothing: any bad id/field aborts before any write.
+    """
+    ids = [str(i) for i in (ids or [])]
+    fields = fields or {}
+    if not ids:
+        raise ValueError("No rolls selected")
+    keys = [k for k in fields if k in _BULK_EDIT_COLS or k == "locationId"]
+    if not keys:
+        raise ValueError("Nothing to change")
+    import datetime
+    today = datetime.date.today().isoformat()
+    with _conn() as c:
+        new_loc = _location_id(c, fields.get("locationId")) if "locationId" in keys else None
+        loc_names = {}
+        for lid in {new_loc}:
+            if lid is not None:
+                row = _q(c, "SELECT name FROM locations WHERE id=%s", (lid,)).fetchone()
+                loc_names[lid] = row["name"] if row else str(lid)
+        # Validate everything first so the batch never half-applies.
+        rows = {}
+        for rid in ids:
+            r = _q(c, "SELECT * FROM rolls WHERE id=%s", (rid,)).fetchone()
+            if not r:
+                raise ValueError("Roll not found: " + rid)
+            rows[rid] = r
+            if r["location_id"] is not None and r["location_id"] not in loc_names:
+                row = _q(c, "SELECT name FROM locations WHERE id=%s", (r["location_id"],)).fetchone()
+                loc_names[r["location_id"]] = row["name"] if row else str(r["location_id"])
+        for rid in ids:
+            r = rows[rid]
+            sets, params, notes = [], [], []
+            for k in keys:
+                if k == "locationId":
+                    sets.append("location_id=%s")
+                    params.append(new_loc)
+                    notes.append("Godown %s -> %s" % (loc_names.get(r["location_id"], "—"),
+                                                      loc_names.get(new_loc, "—")))
+                else:
+                    sets.append(_BULK_EDIT_COLS[k] + "=%s")
+                    params.append(fields[k])
+                    notes.append("%s %s -> %s" % (_BULK_EDIT_LABELS[k], r[_BULK_EDIT_COLS[k]] or "—", fields[k]))
+            params.append(rid)
+            _q(c, "UPDATE rolls SET " + ", ".join(sets) + " WHERE id=%s", tuple(params))
+            _add_history(c, rid, today, "edit", "", 0, float(r["current_weight"] or 0),
+                         "Bulk edit: " + "; ".join(notes))
+        return {"updated": len(ids)}
+
+
 def log_cut(rid, data):
     data = data or {}
     used = round(float(data.get("weightUsed") or 0), 2)

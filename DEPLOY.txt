@@ -34,6 +34,22 @@ BEFORE using "Erase all data" (Backup tab, admin only):
   Download the Stock, Cutting and Wastage CSV reports first.
   Erasing cannot be undone.
 
+V2.15 — BULK EDIT (changes in index.html, app.py and db.py — upload
+all four files together as always)
+  New "Bulk edit" button on the Rolls page: change many rolls at once.
+    Step 1: filter by inward date, company and colour, tick the rolls
+            (or "Select all shown") — the edit applies ONLY to ticked
+            rolls.
+    Step 2: tick the fields to change — Company, Colour, Fabric, Dia,
+            GSM and Godown — and type the new values. Unticked fields
+            are left exactly as they are.
+    Step 3: a check screen lists every roll with its old -> new values;
+            nothing is saved until you press Save.
+  Every changed roll also gets a "Bulk edit" entry in its history, so
+  corrections can be traced later. The Rolls page itself also gains a
+  Colour filter next to the Company filter. Inward dates and weights
+  are NOT changed by bulk edit, so roll IDs never change.
+
 V2.14 — LABELS PAGE COMPANY FILTER (only change from v2.13 is
 index.html, but upload all four files together as always)
   The Print Labels page now has a Company (manufacturer) filter next

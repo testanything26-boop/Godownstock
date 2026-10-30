@@ -377,7 +377,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <body>
 <header>
   <div class="logo">🏭</div>
-  <div><h1>Rollix<span class="vtag">v2.14</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
+  <div><h1>Rollix<span class="vtag">v2.15</span></h1><div class="sub" id="hdr-sub">Fabric roll QR manager</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
     <span id="userchip" style="font-size:12px;color:var(--muted);"></span>
     <button id="btn-logout" class="btn ghost small" style="display:none" onclick="doLogout()">Logout</button>
@@ -406,6 +406,7 @@ td{padding:10px 6px; border-bottom:1px solid #eef2f7; vertical-align:top;}
 <div class="modal" id="m-roll"><div class="sheet" id="m-roll-sheet"></div></div>
 <div class="modal" id="m-cut"><div class="sheet" id="m-cut-sheet"></div></div>
 <div class="modal" id="m-bulk"><div class="sheet" id="m-bulk-sheet"></div></div>
+<div class="modal" id="m-bulkedit"><div class="sheet" id="m-bulkedit-sheet"></div></div>
 <div class="modal" id="m-bag"><div class="sheet" id="m-bag-sheet"></div></div>
 
 <div id="loginOverlay" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:200;align-items:center;justify-content:center;padding:20px;">
@@ -670,7 +671,7 @@ function renderDash(){
 }
 
 /* ---------- rolls list ---------- */
-let rollFilter = { q:"", status:"", fabric:"", loc:"", date:"", maker:"" };
+let rollFilter = { q:"", status:"", fabric:"", loc:"", date:"", maker:"", color:"" };
 function applyRollFilters(list){
   const q = rollFilter.q.trim().toLowerCase();
   if(q) list = list.filter(r=>[r.id,r.fabricType,r.color,r.manufacturer,r.location,(r.styles||[]).join(" ")].join(" ").toLowerCase().includes(q));
@@ -679,6 +680,7 @@ function applyRollFilters(list){
   if(rollFilter.loc) list = list.filter(r=>String(r.locationId||"")===rollFilter.loc);
   if(rollFilter.date) list = list.filter(r=>String(r.createdDate||"")===rollFilter.date);
   if(rollFilter.maker) list = list.filter(r=>String(r.manufacturer||"")===rollFilter.maker);
+  if(rollFilter.color) list = list.filter(r=>String(r.color||"")===rollFilter.color);
   return list;
 }
 function sortRollsNewest(list){
@@ -686,7 +688,7 @@ function sortRollsNewest(list){
     || String(b.id).localeCompare(String(a.id), undefined, {numeric:true}));
 }
 function renderRolls(){
-  const fabrics = uniqueList("fabricType"), makers = uniqueList("manufacturer");
+  const fabrics = uniqueList("fabricType"), makers = uniqueList("manufacturer"), colors = uniqueList("color");
   let list = store.rolls.slice().sort((a,b)=>String(b.createdDate).localeCompare(String(a.createdDate)));
   const q = rollFilter.q.trim().toLowerCase();
   if(q) list = list.filter(r=>[r.id,r.fabricType,r.color,r.manufacturer,r.location,(r.styles||[]).join(" ")].join(" ").toLowerCase().includes(q));
@@ -710,10 +712,14 @@ function renderRolls(){
     + '<div><label>Inward date</label><input type="date" value="'+esc(rollFilter.date)+'" onchange="rollFilter.date=this.value;renderRollsList()"></div>'
     + '<div><label>Company (manufacturer)</label><select onchange="rollFilter.maker=this.value;renderRollsList()"><option value="">All</option>'
     + makers.map(m=>'<option'+(rollFilter.maker===m?" selected":"")+'>'+esc(m)+'</option>').join("")
+    + '</select></div>'
+    + '<div><label>Colour</label><select onchange="rollFilter.color=this.value;renderRollsList()"><option value="">All</option>'
+    + colors.map(c=>'<option'+(rollFilter.color===c?" selected":"")+'>'+esc(c)+'</option>').join("")
     + '</select></div></div>'
-    + '<div class="btnrow"><button class="btn ghost small" onclick="rollFilter={q:\'\',status:\'\',fabric:\'\',loc:\'\',date:\'\',maker:\'\'};renderRolls()">🧹 Clear filters</button></div>'
+    + '<div class="btnrow"><button class="btn ghost small" onclick="rollFilter={q:\'\',status:\'\',fabric:\'\',loc:\'\',date:\'\',maker:\'\',color:\'\'};renderRolls()">🧹 Clear filters</button></div>'
     + '<div class="btnrow"><button class="btn" onclick="openRollForm()">+ Add roll</button>'
-    + '<button class="btn ghost" onclick="openBulkForm()">📦 Bulk add (many rolls)</button></div></div>'
+    + '<button class="btn ghost" onclick="openBulkForm()">📦 Bulk add (many rolls)</button>'
+    + '<button class="btn ghost" onclick="openBulkEdit()">✏️ Bulk edit</button></div></div>'
     + '<div id="rollList"></div>';
   $("v-rolls").innerHTML = h;
   renderRollsList();
@@ -727,7 +733,8 @@ function renderRollsList(){
   const summary = '<div style="background:#eef4ff;border:1px solid #d7e3ff;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:14px">📦 <b>'+list.length+'</b> roll'+(list.length===1?"":"s")
     + ' · <b>'+kg(totCur)+'</b> in stock now · '+kg(totIn)+' inwarded'
     + (rollFilter.date?(' · 📅 '+fmtDate(rollFilter.date)):"")
-    + (rollFilter.maker?(' · 🏭 '+esc(rollFilter.maker)):"") + '</div>';
+    + (rollFilter.maker?(' · 🏭 '+esc(rollFilter.maker)):"")
+    + (rollFilter.color?(' · 🎨 '+esc(rollFilter.color)):"") + '</div>';
   box.innerHTML = summary + list.map(r=>{
     const pct = r.weight>0 ? Math.max(0,Math.min(100, (r.currentWeight/r.weight)*100)) : 0;
     return '<div class="rollcard rc-'+r.status+'" onclick="openRoll(\''+esc(r.id)+'\')">'
@@ -901,7 +908,7 @@ async function saveCutForm(id){
   }catch(e){ if(e.message!=="login") alert(e.message); }
 }
 function closeModal(id){ $(id).classList.remove("open"); }
-document.querySelectorAll(".modal").forEach(m=>m.addEventListener("click", e=>{ if(e.target===m && m.id!=="m-bulk") m.classList.remove("open"); }));
+document.querySelectorAll(".modal").forEach(m=>m.addEventListener("click", e=>{ if(e.target===m && m.id!=="m-bulk" && m.id!=="m-bulkedit") m.classList.remove("open"); }));
 
 /* ---------- scan tab ---------- */
 let scanStream=null, scanRAF=null, scanActive=false;
@@ -1120,6 +1127,123 @@ async function doBulkSave(){
     labelSel = {}; d.ids.forEach(id=>labelSel[id]=true);
     go("labels");
     alert(d.ids.length+" rolls created ("+d.ids[0]+" → "+d.ids[d.ids.length-1]+"). Pre-selected — pick layout and Print.");
+  }catch(e){ if(e.message!=="login") alert(e.message); }
+}
+
+/* ---------- bulk edit ---------- */
+let beFilter = { date:"", maker:"", color:"" };
+let beSel = {};       /* roll id -> true */
+let beChanges = null; /* [{key,label,value,display}] chosen on the values step */
+
+function beMatching(){
+  let list = store.rolls.slice();
+  if(beFilter.date) list = list.filter(r=>String(r.createdDate||"")===beFilter.date);
+  if(beFilter.maker) list = list.filter(r=>String(r.manufacturer||"")===beFilter.maker);
+  if(beFilter.color) list = list.filter(r=>String(r.color||"")===beFilter.color);
+  return sortRollsNewest(list);
+}
+function beTickedIds(){ return Object.keys(beSel).filter(k=>beSel[k]); }
+
+function openBulkEdit(){
+  beFilter = { date: rollFilter.date||"", maker: rollFilter.maker||"", color: rollFilter.color||"" };
+  beSel = {}; beChanges = null;
+  renderBulkEditPick();
+  $("m-bulkedit").classList.add("open");
+}
+function renderBulkEditPick(){
+  const makers = uniqueList("manufacturer"), colors = uniqueList("color");
+  $("m-bulkedit-sheet").innerHTML =
+    '<button class="xbtn" onclick="closeModal(\'m-bulkedit\')" aria-label="Close">✕</button>'
+    + '<h3>✏️ Bulk edit — step 1 of 3: pick the rolls</h3>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Filter by inward date, company and colour, then tick the rolls to change. The edit applies <b>only to ticked rolls</b>.</div>'
+    + '<div class="grid2">'
+    + '<div><label>Inward date</label><input type="date" value="'+esc(beFilter.date)+'" onchange="beFilter.date=this.value;renderBulkEditList()"></div>'
+    + '<div><label>Company (manufacturer)</label><select onchange="beFilter.maker=this.value;renderBulkEditList()"><option value="">All</option>'
+    + makers.map(m=>'<option'+(beFilter.maker===m?" selected":"")+'>'+esc(m)+'</option>').join("") + '</select></div>'
+    + '<div><label>Colour</label><select onchange="beFilter.color=this.value;renderBulkEditList()"><option value="">All</option>'
+    + colors.map(c=>'<option'+(beFilter.color===c?" selected":"")+'>'+esc(c)+'</option>').join("") + '</select></div></div>'
+    + '<div class="btnrow"><button class="btn ghost small" onclick="beSelectAllShown()">☑ Select all shown</button>'
+    + '<button class="btn ghost small" onclick="beSel={};renderBulkEditList()">☐ Clear ticks</button></div>'
+    + '<div id="beList"></div>'
+    + '<div class="btnrow" style="margin-top:12px"><button class="btn ghost" onclick="closeModal(\'m-bulkedit\')">Cancel</button>'
+    + '<button class="btn" onclick="bulkEditToValues()">Next: set new values →</button></div>';
+  renderBulkEditList();
+}
+function renderBulkEditList(){
+  const box = $("beList"); if(!box) return;
+  const list = beMatching(), ticked = beTickedIds().length;
+  if(!list.length){ box.innerHTML = '<div class="empty"><div class="big">🧵</div>No rolls match these filters.</div>'
+    + '<div style="font-size:13px;color:var(--muted)">'+ticked+' roll(s) ticked in total.</div>'; return; }
+  box.innerHTML = '<div style="font-size:13px;color:var(--muted);margin:6px 0">'+list.length+' shown · <b>'+ticked+' ticked</b></div>'
+    + list.map(r=>'<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer">'
+      + '<input type="checkbox" style="width:20px;height:20px;margin-top:2px" '+(beSel[r.id]?"checked":"")+' onchange="beSel[\''+esc(r.id)+'\']=this.checked;renderBulkEditList()">'
+      + '<span><b>'+esc(r.id)+'</b> '+statusBadge(r)+'<br>'
+      + '<span style="font-size:13px;color:var(--muted)">'+esc(r.fabricType||"—")+' · '+esc(r.color||"—")+' · Dia '+esc(r.dia||"—")+' · '+esc(r.gsm||"—")+' GSM · '+kg(r.currentWeight)+' left'
+      + (r.manufacturer?('<br>🏭 '+esc(r.manufacturer)):"")+' · 📅 '+fmtDate(r.createdDate)+(r.location?(' · 📍 '+esc(r.location)):"")+'</span></span></label>').join("");
+}
+function beSelectAllShown(){ beMatching().forEach(r=>{ beSel[r.id]=true; }); renderBulkEditList(); }
+
+function bulkEditToValues(){
+  if(!beTickedIds().length){ alert("Tick at least one roll first."); return; }
+  const makers = uniqueList("manufacturer"), colors = uniqueList("color"), fabrics = uniqueList("fabricType");
+  const row = (key,label,input)=>'<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">'
+    + '<input type="checkbox" id="be-on-'+key+'" style="width:20px;height:20px">'
+    + '<label style="flex:0 0 105px;margin:0" for="be-on-'+key+'">'+label+'</label>'
+    + '<div style="flex:1">'+input+'</div></div>';
+  $("m-bulkedit-sheet").innerHTML =
+    '<button class="xbtn" onclick="closeModal(\'m-bulkedit\')" aria-label="Close">✕</button>'
+    + '<h3>✏️ Bulk edit — step 2 of 3: new values</h3>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">Tick a field to change it for all <b>'+beTickedIds().length+' ticked rolls</b>. Unticked fields stay exactly as they are.</div>'
+    + row("manufacturer","Company", '<input id="be-v-manufacturer" list="be-dl-makers" placeholder="New company / manufacturer name"><datalist id="be-dl-makers">'+makers.map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>')
+    + row("color","Colour", '<input id="be-v-color" list="be-dl-colors" placeholder="New colour"><datalist id="be-dl-colors">'+colors.map(c=>'<option value="'+esc(c)+'">').join("")+'</datalist>')
+    + row("fabricType","Fabric", '<input id="be-v-fabricType" list="be-dl-fabrics" placeholder="New fabric type"><datalist id="be-dl-fabrics">'+fabrics.map(f=>'<option value="'+esc(f)+'">').join("")+'</datalist>')
+    + row("dia","Dia", '<input id="be-v-dia" placeholder="New dia">')
+    + row("gsm","GSM", '<input id="be-v-gsm" placeholder="New GSM">')
+    + row("locationId","Godown", '<select id="be-v-locationId">'+store.locations.map(l=>'<option value="'+l.id+'">📍 '+esc(l.name)+'</option>').join("")+'</select>')
+    + '<div class="btnrow" style="margin-top:12px"><button class="btn ghost" onclick="renderBulkEditPick()">← Back to rolls</button>'
+    + '<button class="btn" onclick="bulkEditToPreview()">Preview changes →</button></div>';
+}
+function bulkEditCollect(){
+  const out = [];
+  const spec = [["manufacturer","Company"],["color","Colour"],["fabricType","Fabric"],["dia","Dia"],["gsm","GSM"],["locationId","Godown"]];
+  for(const [key,label] of spec){
+    const on = $("be-on-"+key); if(!on || !on.checked) continue;
+    const el = $("be-v-"+key); let v = (el.value||"").trim();
+    if(key!=="locationId" && !v) return { error: label+" is ticked but empty — type a value or untick it." };
+    let display = v;
+    if(key==="locationId"){ const loc = store.locations.find(l=>String(l.id)===String(v)); display = loc?loc.name:v; }
+    out.push({ key, label, value: v, display });
+  }
+  if(!out.length) return { error: "Tick at least one field to change." };
+  return { changes: out };
+}
+function bulkEditToPreview(){
+  const res = bulkEditCollect();
+  if(res.error){ alert(res.error); return; }
+  beChanges = res.changes;
+  const ids = beTickedIds();
+  const byId = {}; store.rolls.forEach(r=>byId[r.id]=r);
+  const oldVal = (r,c)=> c.key==="locationId" ? (r.location||"—") : String(r[c.key]||"—");
+  $("m-bulkedit-sheet").innerHTML =
+    '<button class="xbtn" onclick="closeModal(\'m-bulkedit\')" aria-label="Close">✕</button>'
+    + '<h3>✏️ Bulk edit — step 3 of 3: check before saving</h3>'
+    + '<div style="color:var(--muted);font-size:13px;margin-bottom:10px">These <b>'+ids.length+' rolls</b> will change as shown. Nothing is saved until you press Save.</div>'
+    + ids.map(id=>{ const r = byId[id]; if(!r) return "";
+        return '<div style="padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px"><b>'+esc(id)+'</b><br>'
+        + beChanges.map(c=>'<span style="font-size:13px;color:var(--muted)">'+c.label+': '+esc(oldVal(r,c))+' → <b>'+esc(c.display)+'</b></span>').join("<br>") + '</div>'; }).join("")
+    + '<div class="btnrow" style="margin-top:12px"><button class="btn ghost" onclick="bulkEditToValues()">← Back</button>'
+    + '<button class="btn" onclick="doBulkEditSave()">✅ Save changes to '+ids.length+' rolls</button></div>';
+}
+async function doBulkEditSave(){
+  if(!beChanges) return;
+  const ids = beTickedIds();
+  const fields = {}; beChanges.forEach(c=>{ fields[c.key]=c.value; });
+  try{
+    const d = await api("POST","/api/rolls/bulk-edit",{ ids: ids, fields: fields });
+    closeModal("m-bulkedit");
+    beSel = {}; beChanges = null;
+    await refreshState(); renderRolls();
+    alert("✅ Updated "+d.updated+" roll"+(d.updated===1?"":"s")+".");
   }catch(e){ if(e.message!=="login") alert(e.message); }
 }
 
